@@ -1,8 +1,30 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+/** 解码 Flutter 传入的 `-Pdart-defines=`（与 Dart 侧 encodeDartDefines 一致：逗号分隔的 base64(UTF-8) 的「KEY=VALUE」）。 */
+fun decodeFlutterDartDefines(raw: String?): Map<String, String> {
+    if (raw.isNullOrBlank()) return emptyMap()
+    val result = mutableMapOf<String, String>()
+    for (part in raw.split(",")) {
+        val trimmed = part.trim()
+        if (trimmed.isEmpty()) continue
+        try {
+            val decoded = String(Base64.getDecoder().decode(trimmed), Charsets.UTF_8)
+            val eq = decoded.indexOf('=')
+            if (eq > 0) {
+                result[decoded.substring(0, eq)] = decoded.substring(eq + 1)
+            }
+        } catch (_: IllegalArgumentException) {
+            // 非法 base64，跳过
+        }
+    }
+    return result
 }
 
 android {
@@ -28,6 +50,13 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 主屏幕应用名：优先 --dart-define=APP_DISPLAY_NAME=xxx，其次 android/gradle.properties 的 flutter.appDisplayName
+        val fromDartDefines =
+            decodeFlutterDartDefines(project.findProperty("dart-defines")?.toString())["APP_DISPLAY_NAME"]
+        val fromGradle = project.findProperty("flutter.appDisplayName")?.toString()
+        val appDisplayName = (fromDartDefines ?: fromGradle ?: "我的应用")
+        resValue("string", "app_name", appDisplayName)
     }
 
     buildTypes {

@@ -18,6 +18,12 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # of the product and file versions while build-number is used as the build suffix.
 version: 1.0.0+1
 
+# 应用显示名（默认值）建议通过以下方式维护，而不是改 pubspec 的 name：
+# - 构建覆盖：flutter run --dart-define=APP_DISPLAY_NAME=新名字
+# - Android 默认：android/gradle.properties 的 flutter.appDisplayName
+# - Dart 默认：lib/app_branding.dart 里 String.fromEnvironment 的 defaultValue
+# - iOS 默认：ios/Flutter/AppName.xcconfig 的 APP_DISPLAY_NAME
+
 environment:
   sdk: ^3.11.3
 

@@ -1,0 +1,3 @@
+// 默认应用显示名（主屏幕图标下文字）。构建时可用 --dart-define=APP_DISPLAY_NAME=新名字，
+// 并需与 lib/app_branding.dart 的 String.fromEnvironment 默认值保持语义一致。
+APP_DISPLAY_NAME=我的应用
