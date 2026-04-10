@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 全局放行明文 HTTP（Android 9+ 默认禁止 cleartext） -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
+

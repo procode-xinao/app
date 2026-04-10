@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'app_branding.dart';
-import 'pages/browser_page.dart';
+import 'pages/splash_page.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
 
@@ -17,10 +18,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const BrowserPage(
-        initialUrl: 'http://web.arsoft.com.cn:6001/',
-        title: '百度',
-      ),
+      home: const SplashPage(),
     );
   }
 }

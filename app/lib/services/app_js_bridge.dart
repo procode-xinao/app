@@ -12,12 +12,15 @@ import 'device_service.dart';
 import 'file_service.dart';
 import 'launcher_service.dart';
 import 'location_service.dart';
+import 'push_service.dart';
 import 'qr_service.dart';
 import 'storage_service.dart';
 
 typedef NavigationBarStyleSetter = void Function(Map<String, dynamic> style);
 typedef NavigationBarVisibleSetter = void Function(bool visible);
 typedef NavigationBarTitleSetter = void Function(String title);
+typedef NavigationBarButtonsSetter = void Function({bool? back, bool? scan});
+typedef NavigationGoHomeHandler = Future<void> Function();
 
 /// 在 WebView 中注入 `AppBridge` 通道，并在页面加载后安装 `window.App` 助手。
 ///
@@ -45,6 +48,8 @@ class AppJsBridge {
     this.setNavigationBarStyle,
     this.setNavigationBarVisible,
     this.setNavigationBarTitle,
+    this.setNavigationBarButtons,
+    this.goHome,
     StorageService? storage,
     LauncherService? launcher,
     LocationService? location,
@@ -69,6 +74,8 @@ class AppJsBridge {
   final NavigationBarStyleSetter? setNavigationBarStyle;
   final NavigationBarVisibleSetter? setNavigationBarVisible;
   final NavigationBarTitleSetter? setNavigationBarTitle;
+  final NavigationBarButtonsSetter? setNavigationBarButtons;
+  final NavigationGoHomeHandler? goHome;
 
   final StorageService _storage;
   final LauncherService _launcher;
@@ -104,7 +111,9 @@ class AppJsBridge {
 
   window.App = window.App || {};
   window.App.Services = window.App.Services || {};
+  window.App.Auth = window.App.Auth || {};
   window.App.NavigationBar = window.App.NavigationBar || {};
+  window.App.Navigation = window.App.Navigation || {};
 
   window.App.Services.StorageService = {
     Get: function (key) { return call('storage', 'get', { key: key }); },
@@ -112,6 +121,16 @@ class AppJsBridge {
     Remove: function (key) { return call('storage', 'remove', { key: key }); },
     Keys: function () { return call('storage', 'keys', {}); },
     Clear: function () { return call('storage', 'clear', {}); },
+  };
+
+  window.App.Auth.SetAccessToken = function (token) {
+    return call('auth', 'setAccessToken', { token: String(token || '') });
+  };
+  window.App.Auth.GetAccessToken = function () {
+    return call('auth', 'getAccessToken', {});
+  };
+  window.App.Auth.ClearAccessToken = function () {
+    return call('auth', 'clearAccessToken', {});
   };
 
   window.App.Services.ToastService = {
@@ -153,14 +172,22 @@ class AppJsBridge {
     GetInfo: function () { return call('device', 'getInfo', {}); },
   };
 
+  window.App.Services.PushService = {
+    GetRegistrationId: function () { return call('push', 'getRegistrationId', {}); },
+  };
+
   window.App.Services.AppService = {
     GetInfo: function () { return call('app', 'getInfo', {}); },
   };
 
   window.App.NavigationBar.SetStyle = function (style) { return call('navigationBar', 'setStyle', { style: style || {} }); };
   window.App.NavigationBar.SetTitle = function (title) { return call('navigationBar', 'setTitle', { title: String(title || '') }); };
+  // 动态控制顶部按钮显示：{ back: true/false, scan: true/false }
+  window.App.NavigationBar.SetButtons = function (buttons) { return call('navigationBar', 'setButtons', { buttons: buttons || {} }); };
   window.App.NavigationBar.Show = function () { return call('navigationBar', 'setVisible', { visible: true }); };
   window.App.NavigationBar.Hide = function () { return call('navigationBar', 'setVisible', { visible: false }); };
+
+  window.App.Navigation.GoHome = function () { return call('navigation', 'goHome', {}); };
 })();
 ''';
 
@@ -231,6 +258,8 @@ class AppJsBridge {
     switch (ns) {
       case 'storage':
         return _storageDispatch(method, args);
+      case 'auth':
+        return _authDispatch(method, args);
       case 'toast':
         return _toastDispatch(method, args);
       case 'launcher':
@@ -247,10 +276,14 @@ class AppJsBridge {
         return _biometricDispatch(method, args);
       case 'device':
         return _deviceDispatch(method, args);
+      case 'push':
+        return _pushDispatch(method, args);
       case 'app':
         return _appDispatch(method, args);
       case 'navigationBar':
         return _navigationBarDispatch(method, args);
+      case 'navigation':
+        return _navigationDispatch(method, args);
       default:
         throw UnsupportedError('未知命名空间: $ns');
     }
@@ -280,6 +313,22 @@ class AppJsBridge {
         return null;
       default:
         throw UnsupportedError('storage.$method');
+    }
+  }
+
+  Future<Object?> _authDispatch(String? method, Map<String, dynamic> args) async {
+    switch (method) {
+      case 'setAccessToken':
+        final token = (args['token'] as String? ?? '').trim();
+        await _storage.setString('access_token', token);
+        return true;
+      case 'getAccessToken':
+        return await _storage.getString('access_token');
+      case 'clearAccessToken':
+        await _storage.remove('access_token');
+        return true;
+      default:
+        throw UnsupportedError('auth.$method');
     }
   }
 
@@ -364,6 +413,11 @@ class AppJsBridge {
     return await _device.getInfo();
   }
 
+  Future<Object?> _pushDispatch(String? method, Map<String, dynamic> args) async {
+    if (method != 'getRegistrationId') throw UnsupportedError('push.$method');
+    return await PushService.getRegistrationId();
+  }
+
   Future<Object?> _appDispatch(String? method, Map<String, dynamic> args) async {
     if (method != 'getInfo') throw UnsupportedError('app.$method');
     return {
@@ -382,6 +436,16 @@ class AppJsBridge {
         final title = args['title'] as String? ?? '';
         setNavigationBarTitle?.call(title);
         return true;
+      case 'setButtons':
+        final buttons = args['buttons'];
+        if (buttons is! Map<String, dynamic>) throw ArgumentError('buttons 必须是对象');
+        final back = buttons['back'];
+        final scan = buttons['scan'];
+        setNavigationBarButtons?.call(
+          back: back is bool ? back : null,
+          scan: scan is bool ? scan : null,
+        );
+        return true;
       case 'setVisible':
         final visible = args['visible'];
         if (visible is! bool) throw ArgumentError('visible 必须是 boolean');
@@ -390,6 +454,16 @@ class AppJsBridge {
       default:
         throw UnsupportedError('navigationBar.$method');
     }
+  }
+
+  Future<Object?> _navigationDispatch(String? method, Map<String, dynamic> args) async {
+    if (method != 'goHome') throw UnsupportedError('navigation.$method');
+    final handler = goHome;
+    if (handler == null) {
+      throw UnsupportedError('未配置 GoHome 处理器');
+    }
+    await handler();
+    return true;
   }
 }
 

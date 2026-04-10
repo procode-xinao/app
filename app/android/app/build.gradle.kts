@@ -57,6 +57,18 @@ android {
         val fromGradle = project.findProperty("flutter.appDisplayName")?.toString()
         val appDisplayName = (fromDartDefines ?: fromGradle ?: "我的应用")
         resValue("string", "app_name", appDisplayName)
+
+        // 极光推送：建议通过 --dart-define 或 gradle.properties 注入，避免把 key 写死在仓库里
+        val jpushAppKey =
+            decodeFlutterDartDefines(project.findProperty("dart-defines")?.toString())["JPUSH_APP_KEY"]
+                ?: project.findProperty("jpush.appKey")?.toString()
+                ?: ""
+        val jpushChannel =
+            decodeFlutterDartDefines(project.findProperty("dart-defines")?.toString())["JPUSH_CHANNEL"]
+                ?: project.findProperty("jpush.channel")?.toString()
+                ?: "default"
+        manifestPlaceholders["JPUSH_APPKEY"] = jpushAppKey
+        manifestPlaceholders["JPUSH_CHANNEL"] = jpushChannel
     }
 
     buildTypes {
