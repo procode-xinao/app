@@ -1,0 +1,1 @@
+// 由 inject_branding.sh 在每次 Xcode 构建时覆盖；提交仓库可避免未在 Mac 上构建时的占位APP_DISPLAY_NAME = "app"
