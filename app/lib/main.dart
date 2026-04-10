@@ -18,7 +18,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
       home: const BrowserPage(
-        initialUrl: 'https://www.baidu.com',
+        initialUrl: 'http://web.arsoft.com.cn:6001/',
         title: '百度',
       ),
     );

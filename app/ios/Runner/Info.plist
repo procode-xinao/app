@@ -66,5 +66,13 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>用于在网页中向脚本提供当前位置信息</string>
+	<key>NSContactsUsageDescription</key>
+	<string>用于在网页中读取通讯录（由页面脚本请求时）</string>
+	<key>NSCameraUsageDescription</key>
+	<string>用于扫码（由页面脚本请求时）</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>用于生物识别验证（由页面脚本请求时）</string>
 </dict>
 </plist>
