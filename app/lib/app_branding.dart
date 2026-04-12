@@ -12,3 +12,11 @@ const String kAppDisplayName = String.fromEnvironment(
   'APP_DISPLAY_NAME',
   defaultValue: '我的应用',
 );
+
+/// 非全屏时状态栏/导航栏衬色（十六进制字符串，可带或不带 `#`）。
+/// 若 `/v1/app` 返回了 `top_background_color`，则以接口为准覆盖本默认值。
+/// 构建覆盖：`--dart-define=APP_TOP_BACKGROUND_COLOR=FFFFFF`
+const String kTopBackgroundColorDefine = String.fromEnvironment(
+  'APP_TOP_BACKGROUND_COLOR',
+  defaultValue: '000000',
+);

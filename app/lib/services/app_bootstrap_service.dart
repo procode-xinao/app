@@ -1,6 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
+
+import '../app_branding.dart';
+import '../utils/hex_color.dart';
+
 const String kExternalServerUrl = String.fromEnvironment(
   'APP_EXTERNAL_SERVER_URL',
   defaultValue: 'http://web.arsoft.com.cn:6002',
@@ -14,70 +19,21 @@ const String kAppCode = String.fromEnvironment(
   defaultValue: 'code',
 );
 
+/// `/v1/app` 拉取结果：必填 `url`、`is_enable`；可选 `jpush_app_key`、`top_background_color`。
 class AppBootstrapResult {
   AppBootstrapResult({
     required this.serverBaseUrl,
-    required this.app,
-    required this.navigations,
-    required this.homeUrl,
-    required this.homeIndex,
+    required this.entryUrl,
+    required this.jpushAppKey,
+    required this.topBackgroundColor,
   });
 
   final String serverBaseUrl;
-  final AppConfig app;
-  final List<AppNavigationItem> navigations;
-  final String homeUrl;
-  final int homeIndex;
-}
-
-class AppConfig {
-  AppConfig({
-    required this.name,
-    required this.splashUrl,
-    required this.defaultNavigationId,
-    required this.bottomNavigationBackgroundColor,
-    required this.bottomFontColor,
-    required this.bottomActiveFontColor,
-    required this.bottomFontSize,
-    required this.bottomActiveFontSize,
-    required this.topNavigationBackgroundColor,
-    required this.topFontColor,
-    required this.loginUrl,
-    required this.jpushAppKey,
-    required this.isEnable,
-  });
-
-  final String name;
-  final String splashUrl;
-  final int? defaultNavigationId;
-  final String? bottomNavigationBackgroundColor;
-  final String? bottomFontColor;
-  final String? bottomActiveFontColor;
-  final double? bottomFontSize;
-  final double? bottomActiveFontSize;
-  final String? topNavigationBackgroundColor;
-  final String? topFontColor;
-  final String loginUrl;
+  /// 由响应中的 `url` 与 [serverBaseUrl] 解析得到的 H5 入口。
+  final String entryUrl;
   final String jpushAppKey;
-  final bool isEnable;
-}
-
-class AppNavigationItem {
-  AppNavigationItem({
-    required this.id,
-    required this.name,
-    required this.icon,
-    required this.url,
-    required this.order,
-    required this.isEnable,
-  });
-
-  final int id;
-  final String name;
-  final String icon;
-  final String url;
-  final int order;
-  final bool isEnable;
+  /// 非全屏时状态栏/安全区衬色；来自 `top_background_color` 或 [kTopBackgroundColorDefine]。
+  final Color topBackgroundColor;
 }
 
 class AppBootstrapService {
@@ -92,23 +48,19 @@ class AppBootstrapService {
       final baseUrl = candidates[i];
       if (i > 0 && baseUrl == candidates[i - 1]) continue;
       try {
-        final app = await _fetchApp(baseUrl);
-        if (!app.isEnable) throw Exception('app disabled');
-        final navs = await _fetchNavigations(baseUrl);
-        final homeIndex = app.defaultNavigationId == null
-            ? -1
-            : navs.indexWhere((e) => e.id == app.defaultNavigationId);
-        final homeUrl = (homeIndex >= 0 && homeIndex < navs.length)
-            ? _resolveToAbsoluteUrl(baseUrl, navs[homeIndex].url)
-            : navs.isNotEmpty
-            ? _resolveToAbsoluteUrl(baseUrl, navs.first.url)
-            : baseUrl;
+        final uri = Uri.parse(baseUrl).resolve('/api/${Uri.encodeComponent(kAppCode)}/v1/app');
+        final data = await _getJsonObject(uri);
+        if (data['is_enable'] != true) throw Exception('app disabled');
+
+        final raw = data['url'];
+        final pathOrUrl = raw == null ? '' : raw.toString().trim();
+        if (pathOrUrl.isEmpty) throw Exception('missing url');
+
         return AppBootstrapResult(
           serverBaseUrl: baseUrl,
-          app: app,
-          navigations: navs,
-          homeUrl: homeUrl,
-          homeIndex: homeIndex < 0 ? 0 : homeIndex,
+          entryUrl: _resolveToAbsoluteUrl(baseUrl, pathOrUrl),
+          jpushAppKey: (data['jpush_app_key'] ?? '').toString(),
+          topBackgroundColor: _resolveTopBackgroundColor(data),
         );
       } catch (e) {
         lastError = e;
@@ -140,70 +92,10 @@ class AppBootstrapService {
     }
   }
 
-  Future<AppConfig> _fetchApp(String baseUrl) async {
-    final uri = Uri.parse(baseUrl).resolve('/api/${Uri.encodeComponent(kAppCode)}/v1/app');
-    final data = await _getJsonObject(uri);
-    return AppConfig(
-      name: (data['name'] ?? data['f_name'] ?? '').toString(),
-      splashUrl: (data['url'] ?? data['f_url'] ?? '').toString(),
-      defaultNavigationId: _toIntOrNull(
-        data['app_navigation_id'] ?? data['default_navigation_id'] ?? data['f_app_navigation_id'],
-      ),
-      bottomNavigationBackgroundColor: _readString(
-        data,
-        const ['bottom_navigation_background_color', 'f_bottom_navigation_background_color'],
-      ),
-      bottomFontColor: _readString(data, const ['bottom_font_color', 'f_bottom_font_color']),
-      bottomActiveFontColor: _readString(
-        data,
-        const ['bottom_active_font_color', 'f_bottom_active_font_color'],
-      ),
-      bottomFontSize: _toDoubleOrNull(data['bottom_font_size'] ?? data['f_bottom_font_size']),
-      bottomActiveFontSize: _toDoubleOrNull(
-        data['bottom_active_font_size'] ?? data['f_bottom_active_font_size'],
-      ),
-      topNavigationBackgroundColor: _readString(
-        data,
-        const ['top_navigation_background_color', 'f_top_navigation_background_color'],
-      ),
-      topFontColor: _readString(data, const ['top_font_color', 'f_top_font_color']),
-      loginUrl: (data['login_url'] ?? data['f_login_url'] ?? '').toString(),
-      jpushAppKey: (data['jpush_app_key'] ?? data['f_jpush_app_key'] ?? '').toString(),
-      isEnable: data['is_enable'] == true || data['f_is_enable'] == true,
-    );
-  }
-
-  Future<List<AppNavigationItem>> _fetchNavigations(String baseUrl) async {
-    final uri = Uri.parse(baseUrl).resolve('/api/${Uri.encodeComponent(kAppCode)}/v1/app_navigations');
-    final list = await _getJsonArray(uri);
-    final items = list
-        .whereType<Map<String, dynamic>>()
-        .map(
-          (e) => AppNavigationItem(
-            id: _toIntOrNull(e['id'] ?? e['f_id']) ?? 0,
-            name: (e['name'] ?? e['f_name'] ?? '').toString(),
-            icon: (e['icon'] ?? e['f_icon'] ?? '').toString(),
-            url: (e['url'] ?? e['f_url'] ?? '').toString(),
-            order: _toIntOrNull(e['order'] ?? e['f_order']) ?? 0,
-            isEnable: e['is_enable'] == true || e['f_is_enable'] == true,
-          ),
-        )
-        .where((e) => e.isEnable && e.url.trim().isNotEmpty)
-        .toList()
-      ..sort((a, b) => a.order.compareTo(b.order));
-    return items;
-  }
-
   Future<Map<String, dynamic>> _getJsonObject(Uri uri) async {
     final data = await _getJson(uri);
     if (data is Map<String, dynamic>) return data;
     throw Exception('json object expected');
-  }
-
-  Future<List<dynamic>> _getJsonArray(Uri uri) async {
-    final data = await _getJson(uri);
-    if (data is List<dynamic>) return data;
-    throw Exception('json array expected');
   }
 
   Future<dynamic> _getJson(Uri uri) async {
@@ -228,25 +120,10 @@ class AppBootstrapService {
     return Uri.parse(baseUrl).resolve(target).toString();
   }
 
-  int? _toIntOrNull(dynamic value) {
-    if (value == null) return null;
-    if (value is num) return value.toInt();
-    return int.tryParse(value.toString());
-  }
-
-  double? _toDoubleOrNull(dynamic value) {
-    if (value == null) return null;
-    if (value is num) return value.toDouble();
-    return double.tryParse(value.toString());
-  }
-
-  String? _readString(Map<String, dynamic> data, List<String> keys) {
-    for (final key in keys) {
-      final raw = data[key];
-      if (raw == null) continue;
-      final value = raw.toString().trim();
-      if (value.isNotEmpty) return value;
-    }
-    return null;
+  Color _resolveTopBackgroundColor(Map<String, dynamic> data) {
+    final fromApi = parseHexColor(data['top_background_color']?.toString());
+    if (fromApi != null) return fromApi;
+    final fromDefine = parseHexColor(kTopBackgroundColorDefine);
+    return fromDefine ?? const Color(0xFF000000);
   }
 }

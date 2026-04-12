@@ -71,7 +71,9 @@
 	<key>NSContactsUsageDescription</key>
 	<string>用于在网页中读取通讯录（由页面脚本请求时）</string>
 	<key>NSCameraUsageDescription</key>
-	<string>用于扫码（由页面脚本请求时）</string>
+	<string>用于扫码、拍照（由页面脚本请求时）</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>用于从相册选择图片（由页面脚本请求时）</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>用于生物识别验证（由页面脚本请求时）</string>
 </dict>

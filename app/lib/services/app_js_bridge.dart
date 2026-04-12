@@ -2,18 +2,24 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show Route;
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../app_branding.dart';
+import '../utils/hex_color.dart';
+import 'app_settings_service.dart';
 import 'biometric_service.dart';
 import 'contacts_service.dart';
 import 'device_service.dart';
 import 'file_service.dart';
 import 'launcher_service.dart';
+import 'media_pick_service.dart';
 import 'location_service.dart';
+import 'network_service.dart';
 import 'push_service.dart';
 import 'qr_service.dart';
+import 'share_service.dart';
 import 'storage_service.dart';
 
 typedef NavigationBarStyleSetter = void Function(Map<String, dynamic> style);
@@ -21,24 +27,32 @@ typedef NavigationBarVisibleSetter = void Function(bool visible);
 typedef NavigationBarTitleSetter = void Function(String title);
 typedef NavigationBarButtonsSetter = void Function({bool? back, bool? scan});
 typedef NavigationGoHomeHandler = Future<void> Function();
+typedef SystemUiImmersiveChanged = void Function(bool immersive);
+/// `null` 表示恢复为启动配置中的默认衬色（接口 / dart-define）。
+typedef ChromeBackgroundColorChanged = void Function(Color? color);
 
-/// 在 WebView 中注入 `AppBridge` 通道，并在页面加载后安装 `window.App` 助手。
+/// 在 WebView 中注入 `AppBridge` 通道，并在页面加载后安装 `window.MobileApp` 助手。
 ///
 /// 网页中示例：
 /// ```javascript
-/// const v = await App.Services.StorageService.Get('myKey');
-/// await App.Services.StorageService.Set('myKey', 'hello');
-/// await App.Services.ToastService.Show('已保存');
-/// await App.Services.LauncherService.OpenUrl('https://flutter.dev');
-/// const loc = await App.Services.LocationService.Get();
-/// const list = await App.Services.ContactsService.List(20);
-/// const info = await App.Services.AppService.GetInfo();
-/// const qr = await App.Services.QrService.Scan();
-/// const file = await App.Services.FileService.PickFile();
-/// const ok = await App.Services.BiometricService.Authenticate('请验证身份');
-/// const device = await App.Services.DeviceService.GetInfo();
-/// await App.NavigationBar.SetStyle({ title: '标题', backgroundColor: '#000000', foregroundColor: '#ffffff', fontSize: 18, fontWeight: 600 });
-/// await App.NavigationBar.Hide();
+/// const v = await MobileApp.Services.StorageService.Get('myKey');
+/// await MobileApp.Services.StorageService.Set('myKey', 'hello');
+/// await MobileApp.Services.ToastService.Show('已保存');
+/// await MobileApp.Services.LauncherService.OpenUrl('https://flutter.dev');
+/// const loc = await MobileApp.Services.LocationService.Get();
+/// const list = await MobileApp.Services.ContactsService.List(20);
+/// const info = await MobileApp.Services.AppService.GetInfo();
+/// const qr = await MobileApp.Services.QrService.Scan();
+/// const file = await MobileApp.Services.FileService.PickFile();
+/// const ok = await MobileApp.Services.BiometricService.Authenticate('请验证身份');
+/// const device = await MobileApp.Services.DeviceService.GetInfo();
+/// await MobileApp.NavigationBar.SetStyle({ title: '标题', backgroundColor: '#000000', foregroundColor: '#ffffff', fontSize: 18, fontWeight: 600 });
+/// await MobileApp.NavigationBar.Hide();
+/// // 真正全屏（隐藏状态栏与底部系统栏）；默认非沉浸以保留状态栏电量等区域
+/// await MobileApp.Window.SetImmersive(true);
+/// await MobileApp.Window.SetImmersive(false);
+/// await MobileApp.Window.SetChromeBackgroundColor('#1677FF');
+/// await MobileApp.Window.SetChromeBackgroundColor(''); // 恢复默认衬色
 /// ```
 class AppJsBridge {
   AppJsBridge({
@@ -50,6 +64,8 @@ class AppJsBridge {
     this.setNavigationBarTitle,
     this.setNavigationBarButtons,
     this.goHome,
+    this.onSystemUiImmersiveChanged,
+    this.onChromeBackgroundColorChanged,
     StorageService? storage,
     LauncherService? launcher,
     LocationService? location,
@@ -58,6 +74,10 @@ class AppJsBridge {
     FileService? files,
     BiometricService? biometric,
     DeviceService? device,
+    ShareService? share,
+    NetworkService? network,
+    MediaPickService? mediaPick,
+    AppSettingsService? appSettings,
   })  : _storage = storage ?? StorageService(),
         _launcher = launcher ?? LauncherService(),
         _location = location ?? LocationService(),
@@ -65,7 +85,11 @@ class AppJsBridge {
         _qr = qr ?? QrService(),
         _files = files ?? FileService(),
         _biometric = biometric ?? BiometricService(),
-        _device = device ?? DeviceService();
+        _device = device ?? DeviceService(),
+        _share = share ?? ShareService(),
+        _network = network ?? NetworkService(),
+        _mediaPick = mediaPick ?? MediaPickService(),
+        _appSettings = appSettings ?? AppSettingsService();
 
   final void Function(String message) showSnackBar;
   final bool Function() isMounted;
@@ -76,6 +100,10 @@ class AppJsBridge {
   final NavigationBarTitleSetter? setNavigationBarTitle;
   final NavigationBarButtonsSetter? setNavigationBarButtons;
   final NavigationGoHomeHandler? goHome;
+  /// 与 [Window.SetImmersive] 同步，供壳层切换 SafeArea（非沉浸时留出状态栏/底部手势区）。
+  final SystemUiImmersiveChanged? onSystemUiImmersiveChanged;
+  /// 与 [Window.SetChromeBackgroundColor] 同步，更新状态栏/WebView 衬色。
+  final ChromeBackgroundColorChanged? onChromeBackgroundColorChanged;
 
   final StorageService _storage;
   final LauncherService _launcher;
@@ -85,6 +113,10 @@ class AppJsBridge {
   final FileService _files;
   final BiometricService _biometric;
   final DeviceService _device;
+  final ShareService _share;
+  final NetworkService _network;
+  final MediaPickService _mediaPick;
+  final AppSettingsService _appSettings;
 
   static const String _channelName = 'AppBridge';
 
@@ -109,13 +141,14 @@ class AppJsBridge {
     });
   }
 
-  window.App = window.App || {};
-  window.App.Services = window.App.Services || {};
-  window.App.Auth = window.App.Auth || {};
-  window.App.NavigationBar = window.App.NavigationBar || {};
-  window.App.Navigation = window.App.Navigation || {};
+  window.MobileApp = window.MobileApp || {};
+  window.MobileApp.Services = window.MobileApp.Services || {};
+  window.MobileApp.Auth = window.MobileApp.Auth || {};
+  window.MobileApp.NavigationBar = window.MobileApp.NavigationBar || {};
+  window.MobileApp.Navigation = window.MobileApp.Navigation || {};
+  window.MobileApp.Window = window.MobileApp.Window || {};
 
-  window.App.Services.StorageService = {
+  window.MobileApp.Services.StorageService = {
     Get: function (key) { return call('storage', 'get', { key: key }); },
     Set: function (key, value) { return call('storage', 'set', { key: key, value: String(value) }); },
     Remove: function (key) { return call('storage', 'remove', { key: key }); },
@@ -123,37 +156,37 @@ class AppJsBridge {
     Clear: function () { return call('storage', 'clear', {}); },
   };
 
-  window.App.Auth.SetAccessToken = function (token) {
+  window.MobileApp.Auth.SetAccessToken = function (token) {
     return call('auth', 'setAccessToken', { token: String(token || '') });
   };
-  window.App.Auth.GetAccessToken = function () {
+  window.MobileApp.Auth.GetAccessToken = function () {
     return call('auth', 'getAccessToken', {});
   };
-  window.App.Auth.ClearAccessToken = function () {
+  window.MobileApp.Auth.ClearAccessToken = function () {
     return call('auth', 'clearAccessToken', {});
   };
 
-  window.App.Services.ToastService = {
+  window.MobileApp.Services.ToastService = {
     Show: function (message) { return call('toast', 'show', { message: String(message) }); },
   };
 
-  window.App.Services.LauncherService = {
+  window.MobileApp.Services.LauncherService = {
     OpenUrl: function (url) { return call('launcher', 'openUrl', { url: String(url) }); },
   };
 
-  window.App.Services.LocationService = {
+  window.MobileApp.Services.LocationService = {
     Get: function () { return call('location', 'get', {}); },
   };
 
-  window.App.Services.ContactsService = {
+  window.MobileApp.Services.ContactsService = {
     List: function (limit) { return call('contacts', 'list', { limit: limit == null ? 50 : Number(limit) }); },
   };
 
-  window.App.Services.QrService = {
+  window.MobileApp.Services.QrService = {
     Scan: function () { return call('qr', 'scan', {}); },
   };
 
-  window.App.Services.FileService = {
+  window.MobileApp.Services.FileService = {
     PickFile: function () { return call('files', 'pickFile', {}); },
     ReadText: function (path) { return call('files', 'readText', { path: String(path) }); },
     WriteText: function (path, text) { return call('files', 'writeText', { path: String(path), text: String(text) }); },
@@ -162,32 +195,65 @@ class AppJsBridge {
     GetAppDir: function () { return call('files', 'getAppDir', {}); },
   };
 
-  window.App.Services.BiometricService = {
+  window.MobileApp.Services.BiometricService = {
     IsSupported: function () { return call('biometric', 'isSupported', {}); },
     Authenticate: function (reason) { return call('biometric', 'authenticate', { reason: String(reason || '请验证身份') }); },
     GetAvailableBiometrics: function () { return call('biometric', 'getAvailableBiometrics', {}); },
   };
 
-  window.App.Services.DeviceService = {
+  window.MobileApp.Services.DeviceService = {
     GetInfo: function () { return call('device', 'getInfo', {}); },
   };
 
-  window.App.Services.PushService = {
+  window.MobileApp.Services.PushService = {
     GetRegistrationId: function () { return call('push', 'getRegistrationId', {}); },
   };
 
-  window.App.Services.AppService = {
+  window.MobileApp.Services.AppService = {
     GetInfo: function () { return call('app', 'getInfo', {}); },
   };
 
-  window.App.NavigationBar.SetStyle = function (style) { return call('navigationBar', 'setStyle', { style: style || {} }); };
-  window.App.NavigationBar.SetTitle = function (title) { return call('navigationBar', 'setTitle', { title: String(title || '') }); };
-  // 动态控制顶部按钮显示：{ back: true/false, scan: true/false }
-  window.App.NavigationBar.SetButtons = function (buttons) { return call('navigationBar', 'setButtons', { buttons: buttons || {} }); };
-  window.App.NavigationBar.Show = function () { return call('navigationBar', 'setVisible', { visible: true }); };
-  window.App.NavigationBar.Hide = function () { return call('navigationBar', 'setVisible', { visible: false }); };
+  window.MobileApp.Services.ShareService = {
+    ShareText: function (text, subject) {
+      return call('share', 'shareText', { text: String(text || ''), subject: subject == null ? '' : String(subject) });
+    },
+    ShareUri: function (url) { return call('share', 'shareUri', { url: String(url || '') }); },
+  };
 
-  window.App.Navigation.GoHome = function () { return call('navigation', 'goHome', {}); };
+  window.MobileApp.Services.ClipboardService = {
+    SetText: function (text) { return call('clipboard', 'setText', { text: String(text || '') }); },
+    GetText: function () { return call('clipboard', 'getText', {}); },
+  };
+
+  window.MobileApp.Services.NetworkService = {
+    GetStatus: function () { return call('network', 'getStatus', {}); },
+  };
+
+  window.MobileApp.Services.MediaService = {
+    PickFromGallery: function () { return call('media', 'pickGallery', {}); },
+    TakePhoto: function () { return call('media', 'takePhoto', {}); },
+  };
+
+  window.MobileApp.Services.SettingsService = {
+    OpenAppSettings: function () { return call('settings', 'openApp', {}); },
+  };
+
+  window.MobileApp.NavigationBar.SetStyle = function (style) { return call('navigationBar', 'setStyle', { style: style || {} }); };
+  window.MobileApp.NavigationBar.SetTitle = function (title) { return call('navigationBar', 'setTitle', { title: String(title || '') }); };
+  // 动态控制顶部按钮显示：{ back: true/false, scan: true/false }
+  window.MobileApp.NavigationBar.SetButtons = function (buttons) { return call('navigationBar', 'setButtons', { buttons: buttons || {} }); };
+  window.MobileApp.NavigationBar.Show = function () { return call('navigationBar', 'setVisible', { visible: true }); };
+  window.MobileApp.NavigationBar.Hide = function () { return call('navigationBar', 'setVisible', { visible: false }); };
+
+  window.MobileApp.Navigation.GoHome = function () { return call('navigation', 'goHome', {}); };
+
+  // true：沉浸式隐藏状态栏/系统栏；false：edge-to-edge，壳层会为 WebView 留出 SafeArea（状态栏与底部手势区等）
+  window.MobileApp.Window.SetImmersive = function (enabled) {
+    return call('window', 'setImmersive', { enabled: Boolean(enabled) });
+  };
+  window.MobileApp.Window.SetChromeBackgroundColor = function (color) {
+    return call('window', 'setChromeBackgroundColor', { color: String(color == null ? '' : color) });
+  };
 })();
 ''';
 
@@ -201,7 +267,7 @@ class AppJsBridge {
     );
   }
 
-  /// 页面加载完成后注入 `window.App`（在 [NavigationDelegate.onPageFinished] 中调用）。
+  /// 页面加载完成后注入 `window.MobileApp` 与桥接脚本（在 [NavigationDelegate.onPageFinished] 中调用）。
   Future<void> injectBootstrap(WebViewController controller) async {
     if (!isMounted()) return;
     try {
@@ -280,10 +346,22 @@ class AppJsBridge {
         return _pushDispatch(method, args);
       case 'app':
         return _appDispatch(method, args);
+      case 'share':
+        return _shareDispatch(method, args);
+      case 'clipboard':
+        return _clipboardDispatch(method, args);
+      case 'network':
+        return _networkDispatch(method, args);
+      case 'media':
+        return _mediaDispatch(method, args);
+      case 'settings':
+        return _settingsDispatch(method, args);
       case 'navigationBar':
         return _navigationBarDispatch(method, args);
       case 'navigation':
         return _navigationDispatch(method, args);
+      case 'window':
+        return _windowDispatch(method, args);
       default:
         throw UnsupportedError('未知命名空间: $ns');
     }
@@ -425,6 +503,58 @@ class AppJsBridge {
     };
   }
 
+  Future<Object?> _shareDispatch(String? method, Map<String, dynamic> args) async {
+    switch (method) {
+      case 'shareText':
+        final text = args['text'] as String? ?? '';
+        final subjectRaw = args['subject'] as String? ?? '';
+        final subject = subjectRaw.trim().isEmpty ? null : subjectRaw;
+        await _share.shareText(text, subject: subject);
+        return true;
+      case 'shareUri':
+        await _share.shareUri(args['url'] as String? ?? '');
+        return true;
+      default:
+        throw UnsupportedError('share.$method');
+    }
+  }
+
+  Future<Object?> _clipboardDispatch(String? method, Map<String, dynamic> args) async {
+    switch (method) {
+      case 'setText':
+        final text = args['text'] as String? ?? '';
+        await Clipboard.setData(ClipboardData(text: text));
+        return true;
+      case 'getText':
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        return data?.text;
+      default:
+        throw UnsupportedError('clipboard.$method');
+    }
+  }
+
+  Future<Object?> _networkDispatch(String? method, Map<String, dynamic> args) async {
+    if (method != 'getStatus') throw UnsupportedError('network.$method');
+    return await _network.getStatus();
+  }
+
+  Future<Object?> _mediaDispatch(String? method, Map<String, dynamic> args) async {
+    switch (method) {
+      case 'pickGallery':
+        return await _mediaPick.pickFromGallery();
+      case 'takePhoto':
+        return await _mediaPick.takePhoto();
+      default:
+        throw UnsupportedError('media.$method');
+    }
+  }
+
+  Future<Object?> _settingsDispatch(String? method, Map<String, dynamic> args) async {
+    if (method != 'openApp') throw UnsupportedError('settings.$method');
+    await _appSettings.openAppSettings();
+    return true;
+  }
+
   Future<Object?> _navigationBarDispatch(String? method, Map<String, dynamic> args) async {
     switch (method) {
       case 'setStyle':
@@ -464,6 +594,34 @@ class AppJsBridge {
     }
     await handler();
     return true;
+  }
+
+  Future<Object?> _windowDispatch(String? method, Map<String, dynamic> args) async {
+    switch (method) {
+      case 'setImmersive':
+        final enabled = args['enabled'] == true;
+        if (enabled) {
+          await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+        } else {
+          await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        }
+        if (isMounted()) {
+          onSystemUiImmersiveChanged?.call(enabled);
+        }
+        return true;
+      case 'setChromeBackgroundColor':
+        final raw = (args['color'] as String? ?? '').trim();
+        if (raw.isEmpty) {
+          if (isMounted()) onChromeBackgroundColorChanged?.call(null);
+          return true;
+        }
+        final parsed = parseHexColor(raw);
+        if (parsed == null) throw ArgumentError('无效的 color，需为 #RGB / #RRGGBB / #AARRGGBB');
+        if (isMounted()) onChromeBackgroundColorChanged?.call(parsed);
+        return true;
+      default:
+        throw UnsupportedError('window.$method');
+    }
   }
 }
 
