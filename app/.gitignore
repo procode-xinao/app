@@ -33,6 +33,9 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# 构建脚本从 /v1/site 下载的启动图标源图（可重新生成）
+assets/brand/launcher_source.png
+
 # Symbolication related
 app.*.symbols
 

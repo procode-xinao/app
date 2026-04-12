@@ -41,6 +41,8 @@ typedef ChromeBackgroundColorChanged = void Function(Color? color);
 /// await MobileApp.Services.LauncherService.OpenUrl('https://flutter.dev');
 /// const loc = await MobileApp.Services.LocationService.Get();
 /// const list = await MobileApp.Services.ContactsService.List(20);
+/// await MobileApp.Services.ContactsService.Save({ displayName: '张三', phones: ['13800138000'], emails: ['a@b.com'] });
+/// const picked = await MobileApp.Services.ContactsService.Pick();
 /// const info = await MobileApp.Services.AppService.GetInfo();
 /// const qr = await MobileApp.Services.QrService.Scan();
 /// const file = await MobileApp.Services.FileService.PickFile();
@@ -180,6 +182,8 @@ class AppJsBridge {
 
   window.MobileApp.Services.ContactsService = {
     List: function (limit) { return call('contacts', 'list', { limit: limit == null ? 50 : Number(limit) }); },
+    Save: function (data) { return call('contacts', 'save', { data: data || {} }); },
+    Pick: function () { return call('contacts', 'pick', {}); },
   };
 
   window.MobileApp.Services.QrService = {
@@ -431,9 +435,19 @@ class AppJsBridge {
   }
 
   Future<Object?> _contactsDispatch(String? method, Map<String, dynamic> args) async {
-    if (method != 'list') throw UnsupportedError('contacts.$method');
-    final limit = (args['limit'] as num?)?.toInt() ?? 50;
-    return await _contacts.listContacts(limit: limit);
+    switch (method) {
+      case 'list':
+        final limit = (args['limit'] as num?)?.toInt() ?? 50;
+        return await _contacts.listContacts(limit: limit);
+      case 'save':
+        final data = args['data'];
+        if (data is! Map<String, dynamic>) throw ArgumentError('data 必须是对象');
+        return await _contacts.saveContact(data);
+      case 'pick':
+        return await _contacts.pickContact();
+      default:
+        throw UnsupportedError('contacts.$method');
+    }
   }
 
   Future<Object?> _qrDispatch(String? method, Map<String, dynamic> args) async {

@@ -60,6 +60,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.14.4
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -109,3 +110,11 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# 图标由 `dart run tool/build_with_site.dart` 从站点拉取后写入 assets/brand/launcher_source.png 再生成。
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/brand/launcher_source.png
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: assets/brand/launcher_source.png
