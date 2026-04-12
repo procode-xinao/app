@@ -1,6 +1,6 @@
 # MobileApp WebView 桥接开发文档
 
-在 Flutter 全屏 **WebView** 中，原生注入全局对象 **`window.MobileApp`**。H5 通过它调用存储、鉴权、系统 UI、设备能力等；**路由与页面结构由前端实现**，本壳不提供原生顶栏或底部 Tab。
+在 Flutter 全屏 **WebView** 中，原生注入全局对象 **`window.MobileApp`**。H5 通过它调用存储、鉴权、系统 UI、设备能力等；**路由与页面结构由前端实现**，本壳不提供原生顶栏或底部 Tab。**系统 UI 默认即为 edge-to-edge（京东式叠字）**，仅在看视频等场景需要时再调用 **`SetImmersive(true)`**。
 
 ---
 
@@ -32,13 +32,14 @@
 
 | 命名空间 | 作用 |
 |----------|------|
-| **`MobileApp.Window`** | 沉浸模式、状态栏/导航栏与 WebView 衬色 |
+| **`MobileApp.Window`** | **`SetImmersive`**（京东式 / 沉浸）与 **`SetChromeBackgroundColor`**（见 §1.1、§4.2） |
 | **`MobileApp.Auth`** | `access_token` 与原生 `SharedPreferences` 同步 |
 | **`MobileApp.Navigation`** | 回到 H5 入口 URL（`GoHome`） |
 | **`MobileApp.NavigationBar`** | Material AppBar（本壳未接 setter，见 §3） |
 | **`MobileApp.Services.*`** | 存储、Toast、外链、定位、通讯录、扫码、文件、生物识别、设备、推送、应用名、分享、剪贴板、网络、相册/相机、系统设置 |
 
-常用路径示例：`MobileApp.Auth.GetAccessToken()`、`MobileApp.Window.SetImmersive(true)`、`MobileApp.Services.StorageService.Get('key')`。
+**默认**：`SystemUiMode.edgeToEdge`，与 **`SetImmersive(false)`** 一致；未调用 `SetImmersive` 即为此模式。  
+常用示例：`MobileApp.Window.SetChromeBackgroundColor('#1677FF')`、`MobileApp.Auth.GetAccessToken()`；全屏结束：`SetImmersive(false)`。
 
 ---
 
@@ -46,13 +47,22 @@
 
 ### 1.1 壳形态
 
+**默认采用 edge-to-edge**：`main.dart` 与进入 **`SplashPage`** 时即 **`SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge)`**，且 **`_immersiveChrome == false`**，与 **`SetImmersive(false)`** 行为一致；H5 **不必**为默认模式显式调用 `SetImmersive(false)`。
+
 | 项目 | 说明 |
 |------|------|
 | 入口 | 拉取 `/v1/app` 后，在 **`SplashPage`** 内用 **`AppWebShell`** 加载 H5 **`url`** |
-| 默认 UI | **非沉浸**：`SystemUiMode.edgeToEdge`，WebView 外包 **`SafeArea`**，状态栏/底部手势区可见 |
-| 沉浸 | H5 调用 **`MobileApp.Window.SetImmersive(true)`** 后去掉 SafeArea 并 **`immersiveSticky`**；`false` 恢复 |
-| 衬色 | 状态栏、导航栏、`Scaffold` 与 WebView 底层背景共用「铬区」颜色；可由接口、dart-define 或桥接设置（见 §4.2） |
+| 系统 UI（两种，**非三种**） | H5 调用 **`MobileApp.Window.SetImmersive(enabled)`** 切换。**沉浸**与**全屏**在实现上同属一类（`immersiveSticky`，隐藏系统栏），与 **edge-to-edge** 并列，共 **两种** 模式，见下表 |
+| 衬色 | 决定 **`Scaffold` / WebView 底层背景色**；在 **京东式** 下还驱动 **状态栏/导航栏图标明暗**；可由接口、dart-define 或 **`SetChromeBackgroundColor`**（§4.2） |
+| H5 避让 | **京东式**下可点击区需 **`env(safe-area-inset-top)`** 等；**沉浸**下四边贴屏，按全屏页处理 |
 | 过度滚动 | 原生 **`WebViewOverScrollMode.never`** + 页面 **`overscroll-behavior: none`** |
+
+**`SetImmersive` 与 `SystemUiMode`**
+
+| `enabled` | 模式（文档称呼） | `SystemUiMode` | 状态栏时间/电量 | `SafeArea`（壳层） |
+|-------------|------------------|----------------|-----------------|---------------------|
+| **`false`**（默认） | **京东式 edge-to-edge** | `edgeToEdge` | **显示**（透明叠在内容上） | 顶 **不**包；左右底 **包**（刘海 / Home 条） |
+| **`true`** | **沉浸 / 全屏**（同一路径） | `immersiveSticky` | **隐藏**（边缘滑出可暂显） | **四边不包** |
 
 ### 1.2 `/v1/app` JSON（与壳相关）
 
@@ -124,7 +134,7 @@ async function withMobileApp(fn) {
 
 | 能力 | 表现 |
 |------|------|
-| **`MobileApp.Window.*`** | **已接**：沉浸、铬区颜色 |
+| **`MobileApp.Window.*`** | **已接**：**`SetImmersive`**、**`SetChromeBackgroundColor`**（见 §1.1、§4.2） |
 | **`MobileApp.Navigation.GoHome`** | **已接**：在当前 WebView 内 **`loadRequest`** 入口 **`url`**，并视情况维护 token |
 | **`MobileApp.NavigationBar.*`** | **未接 setter**：调用仍 **`resolve(true)`**，**无原生顶栏 UI**（保留 API 供复用） |
 | **`MobileApp.Services.*` / `Auth`** | **已接**（有 bridge 即可） |
@@ -138,7 +148,7 @@ async function withMobileApp(fn) {
 
 | 命名空间 | 作用 |
 |----------|------|
-| **`Window`** | 全屏/非全屏、状态栏与底部导航栏衬色、与壳 SafeArea 联动 |
+| **`Window`** | **`SetImmersive`** 切换京东式 / 沉浸；**`SetChromeBackgroundColor`** 衬色与图标对比度 |
 | **`Auth`** | `access_token` 读写 |
 | **`Navigation`** | 回到 H5 入口地址 |
 | **`NavigationBar`** | 原生 AppBar（本壳未使用） |
@@ -148,16 +158,23 @@ async function withMobileApp(fn) {
 
 #### `SetImmersive(enabled)`
 
+启动时**默认已是 edge-to-edge**，一般**无需**先调 `SetImmersive(false)`；在曾调用 `SetImmersive(true)` 后需要恢复京东式时再调 **`false`**。
+
 | 项目 | 说明 |
 |------|------|
 | **签名** | `SetImmersive(enabled: boolean)` |
 | **返回值** | `Promise<true>` |
-| **`true`** | `SystemUiMode.immersiveSticky`，隐藏系统栏；壳层 **去掉 WebView 外层 SafeArea** |
-| **`false`** | `SystemUiMode.edgeToEdge`；壳层 **恢复 SafeArea** |
+| **`false`** | **京东式 edge-to-edge**：`SystemUiMode.edgeToEdge`，状态栏叠字，见 §1.1 表 |
+| **`true`** | **沉浸 / 全屏**：`SystemUiMode.immersiveSticky`，隐藏系统栏，WebView 四边贴屏 |
+
+```javascript
+await MobileApp.Window.SetImmersive(true);  // 视频等全屏
+await MobileApp.Window.SetImmersive(false); // 恢复京东式 / edge-to-edge
+```
 
 #### `SetChromeBackgroundColor(color)`
 
-运行时修改 **非沉浸** 下的衬色（状态栏、底部栏、`Scaffold`、WebView **`setBackgroundColor`**）。沉浸时系统栏透明，WebView 底层色仍会更新。
+在 **`SetImmersive(false)`** 下：更新 **`Scaffold`、WebView 底层背景** 与 **状态栏/导航栏图标明暗**（栏为 **透明**）。**沉浸**下系统栏已隐藏，仍更新 WebView/脚手架底色。
 
 | 项目 | 说明 |
 |------|------|
@@ -268,7 +285,7 @@ await MobileApp.Auth.SetAccessToken(token);
 await MobileApp.Navigation.GoHome();
 ```
 
-### 5.2 视频全屏再恢复
+### 5.2 沉浸全屏后再恢复京东式
 
 ```javascript
 await MobileApp.Window.SetImmersive(true);
@@ -276,7 +293,7 @@ await MobileApp.Window.SetImmersive(true);
 await MobileApp.Window.SetImmersive(false);
 ```
 
-### 5.3 随路由切换状态栏衬色
+### 5.3 随路由切换衬色与图标对比度（京东式下）
 
 ```javascript
 await MobileApp.Window.SetChromeBackgroundColor('#1a1a2e');

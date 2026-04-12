@@ -50,11 +50,11 @@ typedef ChromeBackgroundColorChanged = void Function(Color? color);
 /// const device = await MobileApp.Services.DeviceService.GetInfo();
 /// await MobileApp.NavigationBar.SetStyle({ title: '标题', backgroundColor: '#000000', foregroundColor: '#ffffff', fontSize: 18, fontWeight: 600 });
 /// await MobileApp.NavigationBar.Hide();
-/// // 真正全屏（隐藏状态栏与底部系统栏）；默认非沉浸以保留状态栏电量等区域
-/// await MobileApp.Window.SetImmersive(true);
+/// // 两种系统 UI：false = 京东式 edge-to-edge（状态栏叠字）；true = 沉浸（隐藏系统栏，全屏）
 /// await MobileApp.Window.SetImmersive(false);
+/// await MobileApp.Window.SetImmersive(true);
 /// await MobileApp.Window.SetChromeBackgroundColor('#1677FF');
-/// await MobileApp.Window.SetChromeBackgroundColor(''); // 恢复默认衬色
+/// await MobileApp.Window.SetChromeBackgroundColor('');
 /// ```
 class AppJsBridge {
   AppJsBridge({
@@ -102,9 +102,9 @@ class AppJsBridge {
   final NavigationBarTitleSetter? setNavigationBarTitle;
   final NavigationBarButtonsSetter? setNavigationBarButtons;
   final NavigationGoHomeHandler? goHome;
-  /// 与 [Window.SetImmersive] 同步，供壳层切换 SafeArea（非沉浸时留出状态栏/底部手势区）。
+  /// 与 [Window.SetImmersive] 同步：京东式 edge-to-edge vs 沉浸全屏。
   final SystemUiImmersiveChanged? onSystemUiImmersiveChanged;
-  /// 与 [Window.SetChromeBackgroundColor] 同步，更新状态栏/WebView 衬色。
+  /// 与 [Window.SetChromeBackgroundColor] 同步，更新衬色与系统栏图标对比度。
   final ChromeBackgroundColorChanged? onChromeBackgroundColorChanged;
 
   final StorageService _storage;
@@ -251,7 +251,7 @@ class AppJsBridge {
 
   window.MobileApp.Navigation.GoHome = function () { return call('navigation', 'goHome', {}); };
 
-  // true：沉浸式隐藏状态栏/系统栏；false：edge-to-edge，壳层会为 WebView 留出 SafeArea（状态栏与底部手势区等）
+  // 默认应用已为 edge-to-edge；false：保持/恢复京东式叠字；true：沉浸全屏（immersiveSticky）
   window.MobileApp.Window.SetImmersive = function (enabled) {
     return call('window', 'setImmersive', { enabled: Boolean(enabled) });
   };

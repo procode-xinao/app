@@ -1,9 +1,15 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 
 /// 通讯录（需系统权限）。读取、写入、系统选择器。
 class ContactsService {
+  /// Android：列表与按 ID 读取走原生 [ContactReader]，避免 flutter_contacts 强制
+  /// `IN_VISIBLE_GROUP = 1` 在部分机型上导致列表为空 / 选人后 get 失败。
+  static const MethodChannel _androidContactsChannel =
+      MethodChannel('com.procode.app/contacts');
+
   /// 与 [listContacts] 中单条结构一致。
   Map<String, Object?> _contactToMap(Contact c) => {
         'id': c.id,
@@ -12,12 +18,36 @@ class ContactsService {
         'emails': c.emails.map((e) => e.address).toList(),
       };
 
+  static Map<String, Object?> _androidRowToMap(Map<dynamic, dynamic> row) {
+    List<String> asStringList(dynamic v) {
+      if (v is! List) return [];
+      return v.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
+    }
+
+    return {
+      'id': row['id']?.toString() ?? '',
+      'displayName': row['displayName']?.toString() ?? '',
+      'phones': asStringList(row['phones']),
+      'emails': asStringList(row['emails']),
+    };
+  }
+
   Future<List<Map<String, Object?>>> listContacts({int limit = 50}) async {
     final status = await FlutterContacts.permissions.request(PermissionType.read);
     if (status != PermissionStatus.granted && status != PermissionStatus.limited) {
       throw StateError('通讯录权限被拒绝');
     }
     final take = limit.clamp(1, 500);
+    if (Platform.isAndroid) {
+      final raw = await _androidContactsChannel.invokeMethod<List<dynamic>>(
+        'list',
+        <String, int>{'limit': take},
+      );
+      if (raw == null) return [];
+      return raw
+          .map((e) => _androidRowToMap(Map<dynamic, dynamic>.from(e as Map)))
+          .toList();
+    }
     final raw = await FlutterContacts.getAll(
       properties: {ContactProperty.phone, ContactProperty.email},
       limit: take,
@@ -71,8 +101,20 @@ class ContactsService {
     if (status != PermissionStatus.granted && status != PermissionStatus.limited) {
       throw StateError('通讯录权限被拒绝');
     }
-    final id = await FlutterContacts.native.showPicker();
+    final String? id = Platform.isAndroid
+        ? await _androidContactsChannel.invokeMethod<String>('pickContact')
+        : await FlutterContacts.native.showPicker();
     if (id == null || id.isEmpty) return null;
+
+    if (Platform.isAndroid) {
+      final row = await _androidContactsChannel.invokeMethod<Map<dynamic, dynamic>>(
+        'get',
+        <String, String>{'id': id},
+      );
+      if (row == null) return null;
+      return _androidRowToMap(row);
+    }
+
     final c = await FlutterContacts.get(
       id,
       properties: {ContactProperty.phone, ContactProperty.email},

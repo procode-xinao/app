@@ -10,8 +10,11 @@ import '../services/push_service.dart';
 import '../services/storage_service.dart';
 import '../widgets/app_web_shell.dart';
 
-/// 启动：拉取配置 → WebView 打开主入口。默认 **非沉浸**（状态栏/底部系统区可见），
-/// H5 可通过 `MobileApp.Window.SetImmersive` 切换真正全屏。
+/// 启动：拉取配置 → WebView 打开主入口。
+///
+/// 系统 UI 两种模式（由 **`MobileApp.Window.SetImmersive`**）：
+/// - **`false`（默认）**：**edge-to-edge**（京东式叠字），与 `main.dart` 中 `SystemUiMode.edgeToEdge` 一致；透明状态栏叠字，顶边不包 SafeArea。
+/// - **`true`**：**沉浸/全屏**，`immersiveSticky`，隐藏系统栏，WebView 四边贴屏。
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
 
@@ -27,7 +30,7 @@ class _SplashPageState extends State<SplashPage> {
   String? _error;
 
   WebViewController? _webController;
-  /// `false`：留出状态栏与底部手势区；`true`：与 [SystemUiMode.immersiveSticky] 一致，WebView 贴边全屏。
+  /// `true`：沉浸全屏；`false`：京东式 edge-to-edge。
   bool _immersiveChrome = false;
   /// 桥接 [MobileApp.Window.SetChromeBackgroundColor] 覆盖；`null` 用启动配置默认色。
   Color? _chromeColorOverride;
@@ -131,7 +134,7 @@ class _SplashPageState extends State<SplashPage> {
     await w.setBackgroundColor(_effectiveChromeColor(b));
   }
 
-  /// 非全屏：状态栏/导航栏与当前衬色一致；全屏：透明系统栏。
+  /// 沉浸：透明系统栏（栏已隐藏）；京东式：透明叠字，图标明暗随衬色亮度。
   void _applySystemChrome() {
     final b = _bootstrap;
     if (b == null) return;
@@ -148,10 +151,10 @@ class _SplashPageState extends State<SplashPage> {
     final lightBg = bg.computeLuminance() > 0.5;
     SystemChrome.setSystemUIOverlayStyle(
       SystemUiOverlayStyle(
-        statusBarColor: bg,
+        statusBarColor: Colors.transparent,
         statusBarIconBrightness: lightBg ? Brightness.dark : Brightness.light,
         statusBarBrightness: lightBg ? Brightness.light : Brightness.dark,
-        systemNavigationBarColor: bg,
+        systemNavigationBarColor: Colors.transparent,
         systemNavigationBarIconBrightness: lightBg ? Brightness.dark : Brightness.light,
       ),
     );
@@ -197,15 +200,15 @@ class _SplashPageState extends State<SplashPage> {
         await _setAccessTokenToWebStorage(c, normalized);
       },
     );
-    // 沉浸切换时须保持同一父级结构，否则 AppWebShell 会被卸载重建导致 WebView 整页刷新。
-    // 用 SafeArea 四边开关代替「有时包 SafeArea / 有时不包」。
+    // 京东式：顶不包 SafeArea，左右底避让；沉浸：四边不包。切换须保持子树稳定，避免 WebView 重建。
+    final immersive = _immersiveChrome;
     return Scaffold(
       backgroundColor: _effectiveChromeColor(bootstrap),
       body: SafeArea(
-        left: !_immersiveChrome,
-        top: !_immersiveChrome,
-        right: !_immersiveChrome,
-        bottom: !_immersiveChrome,
+        left: !immersive,
+        top: false,
+        right: !immersive,
+        bottom: !immersive,
         child: SizedBox.expand(child: shell),
       ),
     );
