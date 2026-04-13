@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../services/app_js_bridge.dart';
+import '../services/webview_file_picker.dart';
 
 typedef WebNavigationDecision = FutureOr<bool> Function(String url);
 
@@ -101,6 +104,11 @@ class _AppWebShellState extends State<AppWebShell> {
 
   Future<void> _init() async {
     try {
+      if (kDebugMode &&
+          !kIsWeb &&
+          defaultTargetPlatform == TargetPlatform.android) {
+        await AndroidWebViewController.enableDebugging(true);
+      }
       final controller = WebViewController();
       controller.setJavaScriptMode(widget.javascriptMode);
       // 禁止双指捏合等手势缩放（与 viewport user-scalable=no 叠加）
@@ -134,6 +142,7 @@ class _AppWebShellState extends State<AppWebShell> {
       if (bridge != null) {
         bridge.registerChannel(controller);
       }
+      await configureWebViewFileSelector(controller);
       await controller.loadRequest(Uri.parse(widget.initialUrl));
       if (!mounted) return;
       setState(() => _controller = controller);

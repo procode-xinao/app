@@ -5,6 +5,8 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   connectivity_plus
   file_selector_windows
+  flutter_blue_plus_winrt
+  gal
   geolocator_windows
   local_auth_windows
   share_plus

@@ -10,17 +10,22 @@ import '../app_branding.dart';
 import '../utils/hex_color.dart';
 import 'app_settings_service.dart';
 import 'biometric_service.dart';
+import 'bluetooth_bridge_service.dart';
+import 'calendar_bridge_service.dart';
 import 'contacts_service.dart';
 import 'device_service.dart';
+import 'gallery_save_service.dart';
 import 'file_service.dart';
 import 'launcher_service.dart';
 import 'media_pick_service.dart';
 import 'location_service.dart';
+import 'nfc_bridge_service.dart';
 import 'network_service.dart';
 import 'push_service.dart';
 import 'qr_service.dart';
 import 'share_service.dart';
 import 'storage_service.dart';
+import 'telephony_service.dart';
 
 typedef NavigationBarStyleSetter = void Function(Map<String, dynamic> style);
 typedef NavigationBarVisibleSetter = void Function(bool visible);
@@ -80,6 +85,11 @@ class AppJsBridge {
     NetworkService? network,
     MediaPickService? mediaPick,
     AppSettingsService? appSettings,
+    GallerySaveService? gallery,
+    TelephonyService? telephony,
+    CalendarBridgeService? calendar,
+    NfcBridgeService? nfc,
+    BluetoothBridgeService? bluetooth,
   })  : _storage = storage ?? StorageService(),
         _launcher = launcher ?? LauncherService(),
         _location = location ?? LocationService(),
@@ -91,7 +101,12 @@ class AppJsBridge {
         _share = share ?? ShareService(),
         _network = network ?? NetworkService(),
         _mediaPick = mediaPick ?? MediaPickService(),
-        _appSettings = appSettings ?? AppSettingsService();
+        _appSettings = appSettings ?? AppSettingsService(),
+        _gallery = gallery ?? GallerySaveService(),
+        _telephony = telephony ?? TelephonyService(),
+        _calendar = calendar ?? CalendarBridgeService(),
+        _nfc = nfc ?? NfcBridgeService(),
+        _bluetooth = bluetooth ?? BluetoothBridgeService();
 
   final void Function(String message) showSnackBar;
   final bool Function() isMounted;
@@ -119,6 +134,14 @@ class AppJsBridge {
   final NetworkService _network;
   final MediaPickService _mediaPick;
   final AppSettingsService _appSettings;
+  final GallerySaveService _gallery;
+  final TelephonyService _telephony;
+  final CalendarBridgeService _calendar;
+  final NfcBridgeService _nfc;
+  final BluetoothBridgeService _bluetooth;
+
+  WebViewController? _webViewController;
+  StreamSubscription<Map<String, Object?>>? _locationWatchSub;
 
   static const String _channelName = 'AppBridge';
 
@@ -178,6 +201,15 @@ class AppJsBridge {
 
   window.MobileApp.Services.LocationService = {
     Get: function () { return call('location', 'get', {}); },
+    StartWatch: function (opts) {
+      var o = opts || {};
+      return call('location', 'startWatch', {
+        distanceFilterM: o.distanceFilterM == null ? 0 : Number(o.distanceFilterM),
+        intervalSec: o.intervalSec == null ? 2 : Number(o.intervalSec),
+        foregroundService: Boolean(o.foregroundService),
+      });
+    },
+    StopWatch: function () { return call('location', 'stopWatch', {}); },
   };
 
   window.MobileApp.Services.ContactsService = {
@@ -242,6 +274,34 @@ class AppJsBridge {
     OpenAppSettings: function () { return call('settings', 'openApp', {}); },
   };
 
+  window.MobileApp.Services.GalleryService = {
+    SaveImageFromPath: function (path) { return call('gallery', 'saveImagePath', { path: String(path || '') }); },
+    SaveImageFromBase64: function (base64, name) {
+      return call('gallery', 'saveImageBase64', { base64: String(base64 || ''), name: name == null ? 'image' : String(name) });
+    },
+  };
+
+  window.MobileApp.Services.TelephonyService = {
+    Dial: function (phone) { return call('telephony', 'dial', { phone: String(phone || '') }); },
+    SendSms: function (phone, body) {
+      return call('telephony', 'sendSms', { phone: String(phone || ''), body: body == null ? '' : String(body) });
+    },
+  };
+
+  window.MobileApp.Services.CalendarService = {
+    AddEvent: function (o) { return call('calendar', 'addEvent', o || {}); },
+  };
+
+  window.MobileApp.Services.NfcService = {
+    GetAvailability: function () { return call('nfc', 'availability', {}); },
+    ReadNdef: function (timeoutSec) { return call('nfc', 'readNdef', { timeoutSec: timeoutSec == null ? 30 : Number(timeoutSec) }); },
+  };
+
+  window.MobileApp.Services.BluetoothService = {
+    GetStatus: function () { return call('bluetooth', 'status', {}); },
+    Scan: function (timeoutSec) { return call('bluetooth', 'scan', { timeoutSec: timeoutSec == null ? 8 : Number(timeoutSec) }); },
+  };
+
   window.MobileApp.NavigationBar.SetStyle = function (style) { return call('navigationBar', 'setStyle', { style: style || {} }); };
   window.MobileApp.NavigationBar.SetTitle = function (title) { return call('navigationBar', 'setTitle', { title: String(title || '') }); };
   // 动态控制顶部按钮显示：{ back: true/false, scan: true/false }
@@ -263,6 +323,7 @@ class AppJsBridge {
 
   /// 注册 JS 通道（须在 [WebViewController.loadRequest] 之前调用）。
   void registerChannel(WebViewController controller) {
+    _webViewController = controller;
     controller.addJavaScriptChannel(
       _channelName,
       onMessageReceived: (JavaScriptMessage message) {
@@ -336,6 +397,16 @@ class AppJsBridge {
         return _launcherDispatch(method, args);
       case 'location':
         return _locationDispatch(method, args);
+      case 'gallery':
+        return _galleryDispatch(method, args);
+      case 'telephony':
+        return _telephonyDispatch(method, args);
+      case 'calendar':
+        return _calendarDispatch(method, args);
+      case 'nfc':
+        return _nfcDispatch(method, args);
+      case 'bluetooth':
+        return _bluetoothDispatch(method, args);
       case 'contacts':
         return _contactsDispatch(method, args);
       case 'qr':
@@ -430,8 +501,115 @@ class AppJsBridge {
   }
 
   Future<Object?> _locationDispatch(String? method, Map<String, dynamic> args) async {
-    if (method != 'get') throw UnsupportedError('location.$method');
-    return await _location.getCurrentPosition();
+    switch (method) {
+      case 'get':
+        return await _location.getCurrentPosition();
+      case 'startWatch':
+        final distance = (args['distanceFilterM'] as num?)?.toInt() ?? 0;
+        final intervalSec = (args['intervalSec'] as num?)?.toInt() ?? 2;
+        final foreground = args['foregroundService'] == true;
+        await _locationWatchSub?.cancel();
+        _locationWatchSub = _location
+            .watchPosition(
+              distanceFilterM: distance,
+              intervalSec: intervalSec,
+              androidForegroundService: foreground,
+            )
+            .listen(
+              (m) => unawaited(_emitLocationUpdate(m)),
+              onError: (Object e, StackTrace st) => debugPrint('location watch: $e'),
+            );
+        return true;
+      case 'stopWatch':
+        await _locationWatchSub?.cancel();
+        _locationWatchSub = null;
+        return true;
+      default:
+        throw UnsupportedError('location.$method');
+    }
+  }
+
+  Future<void> _emitLocationUpdate(Map<String, Object?> loc) async {
+    final c = _webViewController;
+    if (c == null || !isMounted()) return;
+    final json = jsonEncode(loc);
+    try {
+      await c.runJavaScript(
+        'try{if(window.MobileApp&&typeof window.MobileApp.onLocationUpdate==="function"){window.MobileApp.onLocationUpdate($json);}}catch(e){console.error(e);}',
+      );
+    } catch (e, st) {
+      debugPrint('AppJsBridge location emit: $e\n$st');
+    }
+  }
+
+  Future<Object?> _galleryDispatch(String? method, Map<String, dynamic> args) async {
+    switch (method) {
+      case 'saveImagePath':
+        final path = args['path'] as String? ?? '';
+        if (path.isEmpty) throw ArgumentError('缺少 path');
+        return await _gallery.saveImageFromPath(path);
+      case 'saveImageBase64':
+        final b64 = args['base64'] as String? ?? '';
+        if (b64.isEmpty) throw ArgumentError('缺少 base64');
+        final rawName = args['name'] as String?;
+        final name = (rawName == null || rawName.trim().isEmpty) ? 'image' : rawName.trim();
+        return await _gallery.saveImageFromBase64(b64, name: name);
+      default:
+        throw UnsupportedError('gallery.$method');
+    }
+  }
+
+  Future<Object?> _telephonyDispatch(String? method, Map<String, dynamic> args) async {
+    switch (method) {
+      case 'dial':
+        return await _telephony.dial(args['phone'] as String? ?? '');
+      case 'sendSms':
+        return await _telephony.sendSms(
+          args['phone'] as String? ?? '',
+          body: args['body'] as String?,
+        );
+      default:
+        throw UnsupportedError('telephony.$method');
+    }
+  }
+
+  Future<Object?> _calendarDispatch(String? method, Map<String, dynamic> args) async {
+    if (method != 'addEvent') throw UnsupportedError('calendar.$method');
+    final startMs = (args['startMs'] as num?)?.toInt();
+    final endMs = (args['endMs'] as num?)?.toInt();
+    if (startMs == null || endMs == null) throw ArgumentError('startMs / endMs 必填');
+    return await _calendar.addEvent(
+      title: args['title'] as String? ?? '',
+      description: args['description'] as String?,
+      location: args['location'] as String?,
+      startMs: startMs,
+      endMs: endMs,
+      allDay: args['allDay'] == true,
+    );
+  }
+
+  Future<Object?> _nfcDispatch(String? method, Map<String, dynamic> args) async {
+    switch (method) {
+      case 'availability':
+        return await _nfc.checkAvailability();
+      case 'readNdef':
+        final t = (args['timeoutSec'] as num?)?.toInt() ?? 30;
+        return await _nfc.readNdefOnce(timeoutSec: t);
+      default:
+        throw UnsupportedError('nfc.$method');
+    }
+  }
+
+  Future<Object?> _bluetoothDispatch(String? method, Map<String, dynamic> args) async {
+    switch (method) {
+      case 'status':
+        return await _bluetooth.getStatus();
+      case 'scan':
+        final t = (args['timeoutSec'] as num?)?.toInt() ?? 8;
+        return await _bluetooth.scan(timeoutSec: t);
+      default:
+        throw UnsupportedError('bluetooth.$method');
+    }
   }
 
   Future<Object?> _contactsDispatch(String? method, Map<String, dynamic> args) async {

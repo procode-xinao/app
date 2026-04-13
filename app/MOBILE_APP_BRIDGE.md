@@ -8,7 +8,7 @@
 
 | 角色 | 建议阅读 |
 |------|----------|
-| **H5 / 前端** | [快速参考](#快速参考) → [调用约定](#23-调用约定) → [API 参考](#4-api-参考) → [示例](#5-示例) |
+| **H5 / 前端** | [快速参考](#快速参考) → [调用约定](#23-调用约定) → [API 参考](#4-api-参考) → [**§4.7 扩展能力使用明细**](#47-扩展能力使用明细) → [示例](#5-示例) |
 | **Flutter / 壳维护** | [应用壳与启动](#1-应用壳与启动配置) → [桥接机制](#2-桥接机制) → [本壳行为差异](#3-本壳中的行为差异) → [附录](#8-附录) |
 
 ---
@@ -18,7 +18,7 @@
 1. [应用壳与启动配置](#1-应用壳与启动配置)
 2. [桥接机制](#2-桥接机制)
 3. [本壳中的行为差异](#3-本壳中的行为差异)
-4. [API 参考](#4-api-参考)
+4. [API 参考](#4-api-参考)（含 [§4.7 扩展能力使用明细](#47-扩展能力使用明细)）
 5. [示例](#5-示例)
 6. [错误与调试](#6-错误与调试)
 7. [权限与平台](#7-权限与平台)
@@ -36,7 +36,7 @@
 | **`MobileApp.Auth`** | `access_token` 与原生 `SharedPreferences` 同步 |
 | **`MobileApp.Navigation`** | 回到 H5 入口 URL（`GoHome`） |
 | **`MobileApp.NavigationBar`** | Material AppBar（本壳未接 setter，见 §3） |
-| **`MobileApp.Services.*`** | 存储、Toast、外链、定位、通讯录、扫码、文件、生物识别、设备、推送、应用名、分享、剪贴板、网络、相册/相机、系统设置 |
+| **`MobileApp.Services.*`** | 存储、Toast、外链、定位（含持续上报）、通讯录、扫码、文件、生物识别、设备、推送、应用名、分享、剪贴板、网络、相册/相机、相册保存、拨号/短信、日历、NFC、蓝牙扫描、系统设置 |
 
 **默认**：`SystemUiMode.edgeToEdge`，与 **`SetImmersive(false)`** 一致；未调用 `SetImmersive` 即为此模式。  
 常用示例：`MobileApp.Window.SetChromeBackgroundColor('#1677FF')`、`MobileApp.Auth.GetAccessToken()`；全屏结束：`SetImmersive(false)`。
@@ -230,6 +230,12 @@ await MobileApp.Window.SetChromeBackgroundColor('');
 | **ToastService** | `Show(message)` | `Promise<null>` |
 | **LauncherService** | `OpenUrl(url)` | `Promise<true>` |
 | **LocationService** | `Get()` | `Promise<object>`，需定位权限 |
+| | `StartWatch(opts?)` / `StopWatch()` | 持续定位；需在页面设置 **`MobileApp.onLocationUpdate`**；见 §4.6.4 |
+| **GalleryService** | `SaveImageFromPath` / `SaveImageFromBase64` | 写入系统相册；需授权；见 §4.6.4 |
+| **TelephonyService** | `Dial(phone)` / `SendSms(phone, body?)` | 调起系统拨号/短信 |
+| **CalendarService** | `AddEvent(obj)` | `title`、`startMs`、`endMs` 等；打开系统日历写入；见 §4.6.4 |
+| **NfcService** | `GetAvailability` / `ReadNdef(timeoutSec?)` | **仅部分设备**；iOS 需在 Xcode 配置 NFC 能力；见 §4.6.4 |
+| **BluetoothService** | `GetStatus` / `Scan(timeoutSec?)` | 短时扫描广播；**非**持续连接；见 §4.6.4 |
 | **ContactsService** | `List(limit?)` | 默认 `limit=50`，需读权限；见 §4.6.2 |
 | | `Save(data)` | 新建联系人，需读写权限；返回新联系人 **`id`（字符串）**；见 §4.6.2 |
 | | `Pick()` | 系统通讯录选择器；**仅 Android / iOS**；见 §4.6.2 |
@@ -246,7 +252,12 @@ await MobileApp.Window.SetChromeBackgroundColor('');
 | **MediaService** | `PickFromGallery` / `TakePhoto` | `Promise<string \| null>` 本地路径 |
 | **SettingsService** | `OpenAppSettings()` | `Promise<true>` |
 
-#### 4.6.2 `ContactsService`
+#### 4.6.2 WebView `<input type="file">`（Android）
+
+- **Android**：壳在 `AppWebShell` 内已为 WebView 注册文件选择；表单单选/多选、常见 `accept`（图/视频/任意）会调起 **`file_picker` / 相机**。
+- **iOS**：由 WKWebView 默认处理，一般无需额外桥接。
+
+#### 4.6.3 `ContactsService`
 
 **`List(limit?)`**
 
@@ -268,11 +279,135 @@ await MobileApp.Window.SetChromeBackgroundColor('');
 - 弹出**系统通讯录选择器**；用户取消返回 **`null`**；选中则返回与 **`List`** 单项相同结构。
 - **仅 Android / iOS**；其它平台 **reject**。
 
-#### 4.6.3 其它说明（节选）
+#### 4.6.4 持续定位、相册、日历、NFC、蓝牙（概要）
+
+以下能力**参数、返回值、平台差异的完整明细**见 **[§4.7](#47-扩展能力使用明细)**。
+
+- **持续定位**：`LocationService.StartWatch` / `StopWatch`，需 **`MobileApp.onLocationUpdate`**。
+- **相册**：`GalleryService.SaveImageFromPath` / `SaveImageFromBase64`。
+- **日历**：`CalendarService.AddEvent`（系统日历写入，非系统闹钟 API）。
+- **NFC**：`NfcService.GetAvailability` / `ReadNdef`。
+- **蓝牙**：`BluetoothService.GetStatus` / `Scan`（仅扫描，不连接）。
+
+#### 4.6.5 其它说明（节选）
 
 - **Storage**：空 `key` **reject**。
 - **FileService**：`PickFile` 用户取消 → **reject**；`ListDir` 项含 `path`、`type`、`size`、`modified`（毫秒时间戳）。
 - **ShareText**：`subject` 省略或空则无主题。
+
+### 4.7 扩展能力使用明细
+
+以下均为 **`async`**：成功 **`resolve`**，失败 **`reject(Error)`**（与 §2.3 一致）。调用前建议 **`if (!window.MobileApp) return`**。
+
+#### 4.7.1 WebView 内 `<input type="file">`（非 `MobileApp` 方法）
+
+| 项目 | 说明 |
+|------|------|
+| **是否调桥** | **否**。页面写标准 HTML 即可。 |
+| **Android** | 壳已注册 `onShowFileChooser`：`accept` 为图片/视频/混合时分别调相册或文件选择；带 **`capture`** 且为图片时优先调相机。支持 **`multiple`** 多选。 |
+| **iOS** | 由 **WKWebView** 系统行为处理，一般直接出相册/文件。 |
+| **用户取消** | 不更新 `input.files` 或等价于未选文件（与浏览器一致）。 |
+| **路径注意** | 选中文件路径仅在原生侧有效；若需上传请用 `FormData` / 你们服务端直传，勿假设 H5 能任意读磁盘路径。 |
+
+#### 4.7.2 `LocationService`（单次 + 持续）
+
+**`Get()`**
+
+| 项目 | 说明 |
+|------|------|
+| **签名** | `Get()` |
+| **成功返回值** | 对象，字段均为数值（除 `timestamp` 为整数毫秒）： **`latitude`**、**`longitude`**、**`accuracy`**、**`altitude`**、**`heading`**、**`speed`**、**`timestamp`** |
+| **权限** | 定位权限；定位服务需开启。 |
+
+**`StartWatch(opts?)`**
+
+| 参数（`opts` 内） | 类型 | 默认 | 说明 |
+|------------------|------|------|------|
+| **`distanceFilterM`** | number | `0` | 位移超过该米数才可能触发新点；`0` 表示不按距离过滤（仍受系统与 `intervalSec` 影响）。 |
+| **`intervalSec`** | number | `2` | Android 上为位置更新间隔量级（秒，范围在原生侧会限制在合理区间）；iOS 无完全等同间隔，以系统为准。 |
+| **`foregroundService`** | boolean | `false` | **仅 Android**：`true` 时在后台更易保持连续定位（**前台服务 + 通知**）；需通知权限等。 |
+
+| 项目 | 说明 |
+|------|------|
+| **前置条件** | 必须先赋值 **`MobileApp.onLocationUpdate = function (pos) { ... }`**。`pos` 与 **`Get()`** 返回结构相同。未赋值则原生仍会推数据，但页面收不到。 |
+| **成功返回值** | `Promise<true>` |
+| **重复调用** | 再次 **`StartWatch`** 会**取消**上一次订阅，仅保留最新一次。 |
+| **`StopWatch()`** | `Promise<true>`，取消订阅，不再触发 **`onLocationUpdate`**。 |
+
+#### 4.7.3 `GalleryService`
+
+| 方法 | 参数 | 成功返回值 | 说明 |
+|------|------|------------|------|
+| **`SaveImageFromPath`** | **`path`**：字符串，本地绝对路径 | `true` | 文件须存在；会先请求相册写入权限。 |
+| **`SaveImageFromBase64`** | **`base64`**：字符串（可含换行/空白，会去掉）；**`name`**：可选，文件名（无扩展名），默认 **`image`** | `true` | 内容为图片的 Base64；非法数据可能 reject。 |
+
+#### 4.7.4 `TelephonyService`
+
+| 方法 | 参数 | 成功返回值 | 说明 |
+|------|------|------------|------|
+| **`Dial`** | **`phone`**：号码字符串（可含空格等，由系统解析） | `true` | 调起系统**拨号界面**（一般为 `tel:`）。 |
+| **`SendSms`** | **`phone`**：号码；**`body`**：可选，短信正文 | `true` | 调起系统**短信应用**（`sms:`）；是否预填正文依赖系统。 |
+
+#### 4.7.5 `CalendarService.AddEvent`
+
+参数为**一个对象**（与 `call('calendar', 'addEvent', o)` 一致）：
+
+| 字段 | 必填 | 类型 | 说明 |
+|------|------|------|------|
+| **`title`** | 是 | string | 事件标题；纯空白会 reject。 |
+| **`startMs`** | 是 | number | 开始时间 **Unix 毫秒**时间戳。 |
+| **`endMs`** | 是 | number | 结束时间 **Unix 毫秒**；须 **大于** `startMs`。 |
+| **`description`** | 否 | string | 描述。 |
+| **`location`** | 否 | string | 地点。 |
+| **`allDay`** | 否 | boolean | 是否全天；默认 `false`。 |
+
+| 项目 | 说明 |
+|------|------|
+| **成功返回值** | `Promise<boolean>`：用户完成系统日历流程后为 `true`，否则可能为 `false`（依插件/系统）。 |
+| **与「提醒」关系** | 写入的是**日历事件**；系统是否弹出提醒取决于用户在日历 App 中的设置，**不是**独立闹钟 API。 |
+
+#### 4.7.6 `NfcService`
+
+**`GetAvailability()`**
+
+| 成功返回值 | 说明 |
+|------------|------|
+| **`{ status: string }`** | **`status`** 取值：**`enabled`**（可用）、**`disabled`**（有硬件但关闭）、**`unsupported`**（不支持）。 |
+
+**`ReadNdef(timeoutSec?)`**
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| **`timeoutSec`** | `30` | 等待贴卡秒数，建议在 **5–120** 内。 |
+
+| 成功返回值 | 说明 |
+|------------|------|
+| **`{ records: Array }`** | 每条：**`tnf`**（字符串，如 `wellKnown`）、**`typeBase64`**、**`payloadBase64`** 均为 Base64；需自行解码解析 NDEF。 |
+| **失败** | 超时、非 NDEF 标签、用户取消会话等会 **reject**。 |
+
+**iOS**：除 **`NFCReaderUsageDescription`** 外，须在 **Xcode** 开启 **NFC** 能力与 **entitlements**（如 Tag Reading），否则无法读卡。
+
+#### 4.7.7 `BluetoothService`
+
+**`GetStatus()`**
+
+| 成功返回值字段 | 说明 |
+|----------------|------|
+| **`supported`** | boolean，硬件/栈是否支持。 |
+| **`adapterState`** | string，如 **`on`**、**`off`**、**`turningOn`**、**`turningOff`**、**`unsupported`** 等（与 `flutter_blue_plus` 一致）。 |
+
+**`Scan(timeoutSec?)`**
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| **`timeoutSec`** | `8` | 扫描持续时间秒数，原生限制在 **1–30**。 |
+
+| 成功返回值 | 说明 |
+|------------|------|
+| **`Array`** | 每项：**`id`**（设备地址字符串）、**`name`**（广播名或平台名，可能为空串）、**`rssi`**（信号强度）。 |
+| **范围** | **仅扫描**，不连接、不读 GATT 特征；若要 BLE 读写需另扩桥接/原生。 |
+
+**平台**：**仅 Android / iOS**；桌面等会 **reject**。
 
 ---
 
@@ -310,7 +445,46 @@ const path = await MobileApp.Services.MediaService.PickFromGallery();
 const rid = await MobileApp.Services.PushService.GetRegistrationId();
 ```
 
-### 5.5 通讯录：列表、保存、系统选择器
+### 5.5 持续定位、保存图片、拨号、日历
+
+```javascript
+MobileApp.onLocationUpdate = function (pos) {
+  console.log(pos.latitude, pos.longitude, pos.timestamp);
+};
+await MobileApp.Services.LocationService.StartWatch({
+  intervalSec: 3,
+  distanceFilterM: 10,
+  foregroundService: true,
+});
+// await MobileApp.Services.LocationService.StopWatch();
+
+await MobileApp.Services.GalleryService.SaveImageFromPath('/path/from/camera.jpg');
+await MobileApp.Services.TelephonyService.Dial('10086');
+await MobileApp.Services.TelephonyService.SendSms('10086', '查询');
+await MobileApp.Services.CalendarService.AddEvent({
+  title: '会议',
+  startMs: Date.now(),
+  endMs: Date.now() + 3600000,
+});
+```
+
+### 5.6 NFC、蓝牙（与 §4.7.6、§4.7.7 对应）
+
+```javascript
+const { status } = await MobileApp.Services.NfcService.GetAvailability();
+if (status === 'enabled') {
+  const data = await MobileApp.Services.NfcService.ReadNdef(25);
+  console.log(data.records);
+}
+
+const bt = await MobileApp.Services.BluetoothService.GetStatus();
+if (bt.supported && bt.adapterState === 'on') {
+  const devices = await MobileApp.Services.BluetoothService.Scan(10);
+  console.log(devices);
+}
+```
+
+### 5.7 通讯录：列表、保存、系统选择器
 
 ```javascript
 const list = await MobileApp.Services.ContactsService.List(30);
@@ -334,9 +508,9 @@ if (picked) console.log(picked.id, picked.phones);
 
 ## 7. 权限与平台
 
-- 定位、通讯录、相机、生物识别等需在系统中授权；拒绝后对应接口 **reject**。
-- **iOS**：`Info.plist` 中 `NS*UsageDescription`。
-- **Android**：`AndroidManifest.xml` 以工程为准。
+- 定位、通讯录、相机、生物识别、**相册写入**、**日历**、**蓝牙**、**NFC** 等需在系统中授权；拒绝后对应接口 **reject**。
+- **iOS**：`Info.plist` 中 `NS*UsageDescription`；**NFC** 另需在 Xcode 开启能力与 entitlements。
+- **Android**：`AndroidManifest.xml` 以工程为准（含前台定位服务、蓝牙扫描/连接、日历、NFC 等声明）。
 - **桌面 / Web**：部分能力不可用或行为不同；本项目主要面向 **iOS / Android**。
 
 ---
@@ -349,7 +523,7 @@ if (picked) console.log(picked.id, picked.phones);
 |----------|------|
 | JS 助手对象 | `lib/services/app_js_bridge.dart` → `_bootstrap` |
 | 分发 | `_dispatch`、`_windowDispatch`、`_authDispatch` 等 |
-| WebView | `lib/widgets/app_web_shell.dart` |
+| WebView | `lib/widgets/app_web_shell.dart`；文件选择 `lib/services/webview_file_picker.dart` |
 | 启动与铬区 | `lib/pages/splash_page.dart` |
 | 配置拉取 | `lib/services/app_bootstrap_service.dart` |
 

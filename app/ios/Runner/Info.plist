@@ -74,6 +74,14 @@
 	<string>用于扫码、拍照（由页面脚本请求时）</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>用于从相册选择图片（由页面脚本请求时）</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>用于将图片保存到相册（由页面脚本请求时）</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>用于向系统日历添加日程（由页面脚本请求时）</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>用于蓝牙设备扫描（由页面脚本请求时）</string>
+	<key>NFCReaderUsageDescription</key>
+	<string>用于读取 NFC 标签（由页面脚本请求时）</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>用于生物识别验证（由页面脚本请求时）</string>
 </dict>
