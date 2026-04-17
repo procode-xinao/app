@@ -139,6 +139,7 @@ async function withMobileApp(fn) {
 | **`MobileApp.NavigationBar.*`** | **未接 setter**：调用仍 **`resolve(true)`**，**无原生顶栏 UI**（保留 API 供复用） |
 | **`MobileApp.Services.*` / `Auth`** | **已接**（有 bridge 即可） |
 | **`ToastService.Show`** | 依赖 `SnackBar`；Flutter 侧已 **dispose** 时可能静默不展示 |
+| **左缘右滑 / 系统返回** | **`AppWebShell`** 左缘窄条内快滑可触发 WebView **`goBack`**（见构造参数 **`edgeSwipeWebBack`**）。**Android 全面屏自左缘右滑返回**与**实体返回键**由 **`SplashPage`** 的 **`PopScope`** 拦截：有 Web 历史则 **`goBack`**，否则 **`SystemNavigator.pop`** 退出应用。请在 **`MainActivity`** 上设置 **`android:enableOnBackInvokedCallback="true"`**（本工程已加），否则系统可能不把边缘返回交给 Flutter。纯前端路由（如 **`history.pushState`**）若未触发整页导航，**`canGoBack`** 可能一直为 false，此时仍会退出应用。 |
 
 ---
 
@@ -234,7 +235,7 @@ await MobileApp.Window.SetChromeBackgroundColor('');
 | **GalleryService** | `SaveImageFromPath` / `SaveImageFromBase64` | 写入系统相册；需授权；见 §4.6.4 |
 | **TelephonyService** | `Dial(phone)` / `SendSms(phone, body?)` | 调起系统拨号/短信 |
 | **CalendarService** | `AddEvent(obj)` | `title`、`startMs`、`endMs` 等；打开系统日历写入；见 §4.6.4 |
-| **NfcService** | `GetAvailability` / `ReadNdef(timeoutSec?)` | **仅部分设备**；iOS 需在 Xcode 配置 NFC 能力；见 §4.6.4 |
+| **NfcService** | `GetAvailability` / `ReadNdef(timeoutSec?)` / `ReadTransitPublic(timeoutSec?)` | **仅部分设备**；iOS 需在 Xcode 配置 NFC 能力；见 §4.6.4 |
 | **BluetoothService** | `GetStatus` / `Scan(timeoutSec?)` | 短时扫描广播；**非**持续连接；见 §4.6.4 |
 | **ContactsService** | `List(limit?)` | 默认 `limit=50`，需读权限；见 §4.6.2 |
 | | `Save(data)` | 新建联系人，需读写权限；返回新联系人 **`id`（字符串）**；见 §4.6.2 |
@@ -286,7 +287,7 @@ await MobileApp.Window.SetChromeBackgroundColor('');
 - **持续定位**：`LocationService.StartWatch` / `StopWatch`，需 **`MobileApp.onLocationUpdate`**。
 - **相册**：`GalleryService.SaveImageFromPath` / `SaveImageFromBase64`。
 - **日历**：`CalendarService.AddEvent`（系统日历写入，非系统闹钟 API）。
-- **NFC**：`NfcService.GetAvailability` / `ReadNdef`。
+- **NFC**：`NfcService.GetAvailability` / `ReadNdef` / `ReadTransitPublic`。
 - **蓝牙**：`BluetoothService.GetStatus` / `Scan`（仅扫描，不连接）。
 
 #### 4.6.5 其它说明（节选）
@@ -385,6 +386,19 @@ await MobileApp.Window.SetChromeBackgroundColor('');
 | **`{ records: Array }`** | 每条：**`tnf`**（字符串，如 `wellKnown`）、**`typeBase64`**、**`payloadBase64`** 均为 Base64；需自行解码解析 NDEF。 |
 | **失败** | 超时、非 NDEF 标签、用户取消会话等会 **reject**。 |
 
+**`ReadTransitPublic(timeoutSec?)`**
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| **`timeoutSec`** | `20` | 等待贴卡秒数，建议在 **5–60** 内。 |
+
+| 成功返回值 | 说明 |
+|------------|------|
+| **`{ uidHex, techList, isNdef, isoDep?, nfcA?, nfcB? }`** | 读取公交/门禁等**公开可读基础信息**：`uidHex`（卡号十六进制，可能为空）、`techList`（识别到的技术栈）、`isNdef`（是否支持 NDEF）。若存在对应层，还会返回 `isoDep`、`nfcA`、`nfcB` 的公开字段（Base64/Hex）。 |
+| **失败** | 超时、用户取消会话、设备不支持 NFC 等会 **reject**。 |
+
+> 说明：`ReadTransitPublic` 仅返回公开层数据，不包含私有扇区读写、复制或模拟能力。
+
 **iOS**：除 **`NFCReaderUsageDescription`** 外，须在 **Xcode** 开启 **NFC** 能力与 **entitlements**（如 Tag Reading），否则无法读卡。
 
 #### 4.7.7 `BluetoothService`
@@ -475,6 +489,8 @@ const { status } = await MobileApp.Services.NfcService.GetAvailability();
 if (status === 'enabled') {
   const data = await MobileApp.Services.NfcService.ReadNdef(25);
   console.log(data.records);
+  const pub = await MobileApp.Services.NfcService.ReadTransitPublic(20);
+  console.log(pub.uidHex, pub.techList);
 }
 
 const bt = await MobileApp.Services.BluetoothService.GetStatus();

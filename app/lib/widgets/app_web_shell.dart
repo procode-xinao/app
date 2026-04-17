@@ -23,6 +23,8 @@ class AppWebShell extends StatefulWidget {
     this.nativeLikeLockdown = true,
     this.showLoadingIndicator = true,
     this.chromeBackgroundColor,
+    this.edgeSwipeWebBack = true,
+    this.edgeSwipeWidth = 24,
   });
 
   final String initialUrl;
@@ -38,6 +40,10 @@ class AppWebShell extends StatefulWidget {
   final bool showLoadingIndicator;
   /// WebView 底层背景色（与壳衬色一致可减少闪白/与状态栏衔接）。
   final Color? chromeBackgroundColor;
+  /// 自左缘向右滑时，若 WebView 可后退则 [WebViewController.goBack]（不占满屏，避免与横向滚动冲突）。
+  final bool edgeSwipeWebBack;
+  /// [edgeSwipeWebBack] 为 true 时，左缘捕获手势的宽度（逻辑像素）。
+  final double edgeSwipeWidth;
 
   @override
   State<AppWebShell> createState() => _AppWebShellState();
@@ -102,6 +108,20 @@ class _AppWebShellState extends State<AppWebShell> {
     unawaited(_init());
   }
 
+  static const double _minSwipeVelocityX = 200;
+
+  Future<void> _tryWebViewGoBack() async {
+    final c = _controller;
+    if (c == null || !mounted) return;
+    try {
+      if (await c.canGoBack()) {
+        await c.goBack();
+      }
+    } catch (e, st) {
+      debugPrint('AppWebShell goBack: $e\n$st');
+    }
+  }
+
   Future<void> _init() async {
     try {
       if (kDebugMode &&
@@ -157,7 +177,32 @@ class _AppWebShellState extends State<AppWebShell> {
   Widget build(BuildContext context) {
     final controller = _controller;
     if (controller != null) {
-      return WebViewWidget(controller: controller);
+      final web = WebViewWidget(controller: controller);
+      if (!widget.edgeSwipeWebBack || widget.edgeSwipeWidth <= 0) {
+        return web;
+      }
+      final w = widget.edgeSwipeWidth.clamp(8.0, 48.0);
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          web,
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: w,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onHorizontalDragEnd: (details) {
+                final dx = details.velocity.pixelsPerSecond.dx;
+                if (dx > _minSwipeVelocityX) {
+                  unawaited(_tryWebViewGoBack());
+                }
+              },
+            ),
+          ),
+        ],
+      );
     }
     if (_error != null) {
       return Center(

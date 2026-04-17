@@ -111,6 +111,26 @@ class _SplashPageState extends State<SplashPage> {
     await controller.runJavaScript("localStorage.setItem('access_token', '$escaped');");
   }
 
+  /// Android 全面屏左缘右滑 / 实体返回键：优先 WebView 历史后退，否则退出应用。
+  Future<void> _handleSystemBack() async {
+    final c = _webController;
+    if (c != null) {
+      try {
+        if (await c.canGoBack()) {
+          await c.goBack();
+          return;
+        }
+      } catch (e, st) {
+        debugPrint('SplashPage WebView goBack: $e\n$st');
+      }
+    } else if (_bootstrap != null) {
+      // 控制器尚未就绪时勿当作「无历史」而直接退出
+      return;
+    }
+    if (!mounted) return;
+    await SystemNavigator.pop();
+  }
+
   void _showSnackBar(String message) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -202,14 +222,21 @@ class _SplashPageState extends State<SplashPage> {
     );
     // 京东式：顶不包 SafeArea，左右底避让；沉浸：四边不包。切换须保持子树稳定，避免 WebView 重建。
     final immersive = _immersiveChrome;
-    return Scaffold(
-      backgroundColor: _effectiveChromeColor(bootstrap),
-      body: SafeArea(
-        left: !immersive,
-        top: false,
-        right: !immersive,
-        bottom: !immersive,
-        child: SizedBox.expand(child: shell),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (didPop) return;
+        unawaited(_handleSystemBack());
+      },
+      child: Scaffold(
+        backgroundColor: _effectiveChromeColor(bootstrap),
+        body: SafeArea(
+          left: !immersive,
+          top: false,
+          right: !immersive,
+          bottom: !immersive,
+          child: SizedBox.expand(child: shell),
+        ),
       ),
     );
   }

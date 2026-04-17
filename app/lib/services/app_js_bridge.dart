@@ -295,6 +295,7 @@ class AppJsBridge {
   window.MobileApp.Services.NfcService = {
     GetAvailability: function () { return call('nfc', 'availability', {}); },
     ReadNdef: function (timeoutSec) { return call('nfc', 'readNdef', { timeoutSec: timeoutSec == null ? 30 : Number(timeoutSec) }); },
+    ReadTransitPublic: function (timeoutSec) { return call('nfc', 'readTransitPublic', { timeoutSec: timeoutSec == null ? 20 : Number(timeoutSec) }); },
   };
 
   window.MobileApp.Services.BluetoothService = {
@@ -595,6 +596,9 @@ class AppJsBridge {
       case 'readNdef':
         final t = (args['timeoutSec'] as num?)?.toInt() ?? 30;
         return await _nfc.readNdefOnce(timeoutSec: t);
+      case 'readTransitPublic':
+        final t = (args['timeoutSec'] as num?)?.toInt() ?? 20;
+        return await _nfc.readTransitPublicOnce(timeoutSec: t);
       default:
         throw UnsupportedError('nfc.$method');
     }
