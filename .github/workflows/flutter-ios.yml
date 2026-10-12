@@ -35,6 +35,9 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Prepare Flutter (Generated.xcconfig for CocoaPods)
+        run: flutter pub get
+
       - name: CocoaPods
         run: |
           cd ios
