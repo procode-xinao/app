@@ -101,12 +101,9 @@ class ContactsService {
     if (status != PermissionStatus.granted && status != PermissionStatus.limited) {
       throw StateError('通讯录权限被拒绝');
     }
-    final String? id = Platform.isAndroid
-        ? await _androidContactsChannel.invokeMethod<String>('pickContact')
-        : await FlutterContacts.native.showPicker();
-    if (id == null || id.isEmpty) return null;
-
     if (Platform.isAndroid) {
+      final id = (await _androidContactsChannel.invokeMethod('pickContact')) as String?;
+      if (id == null || id.isEmpty) return null;
       final row = await _androidContactsChannel.invokeMethod<Map<dynamic, dynamic>>(
         'get',
         <String, String>{'id': id},
@@ -115,10 +112,7 @@ class ContactsService {
       return _androidRowToMap(row);
     }
 
-    final c = await FlutterContacts.get(
-      id,
-      properties: {ContactProperty.phone, ContactProperty.email},
-    );
+    final c = await FlutterContacts.native.showPicker();
     if (c == null) return null;
     return _contactToMap(c);
   }

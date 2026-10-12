@@ -57,7 +57,7 @@ Future<void> main(List<String> args) async {
   }
 
   final name = json['name']?.toString().trim();
-  final iconUrl = json['icon']?.toString().trim();
+  final iconUrl = (json['icon'] ?? json['logo'])?.toString().trim();
   if (name == null || name.isEmpty) {
     stderr.writeln('响应中缺少非空字段 name');
     exit(1);

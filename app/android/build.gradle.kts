@@ -19,6 +19,14 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+subprojects {
+    pluginManager.withPlugin("com.android.library") {
+        if (!pluginManager.hasPlugin("org.jetbrains.kotlin.android")) {
+            apply(plugin = "org.jetbrains.kotlin.android")
+        }
+    }
+}
+
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
