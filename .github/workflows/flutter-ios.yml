@@ -1,0 +1,57 @@
+# 仅构建 iOS（macOS runner，无签名）
+
+name: Flutter iOS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_url:
+        description: 站点根 URL（build_with_site）
+        required: true
+        default: http://crm.procode.cn:6002/
+      app_server_url:
+        description: 运行时 API 基址（dart-define）
+        required: true
+        default: http://crm.procode.cn:6002
+
+env:
+  PUB_HOSTED_URL: https://pub.flutter-io.cn
+  FLUTTER_STORAGE_BASE_URL: https://storage.flutter-io.cn
+
+jobs:
+  ios-nosign:
+    name: iOS (no codesign)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: CocoaPods
+        run: |
+          cd ios
+          pod install
+          cd ..
+
+      - name: Build iOS
+        run: |
+          dart run tool/build_with_site.dart \
+            --service="${{ github.event.inputs.service_url }}" \
+            build ios --release --no-codesign \
+            --dart-define=APP_EXTERNAL_SERVER_URL=${{ github.event.inputs.app_server_url }} \
+            --dart-define=APP_INTERNAL_SERVER_URL=${{ github.event.inputs.app_server_url }}
+
+      - name: Upload iOS app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-runner-app
+          path: app/build/ios/iphoneos/Runner.app
+          if-no-files-found: error
