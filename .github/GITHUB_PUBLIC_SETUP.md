@@ -41,9 +41,7 @@ git push -u github master:main
 - 使用 **GitHub 官方 hosted runner** 构建 **公开仓库** 时，标准 Actions 用量 **免费**。  
 - 构建机需能访问：`crm.procode.cn:6002`、`storage.procode.cn`（拉站点与图标）。
 
-## 5. iOS 上架（可选）
+## 5. iOS IPA（签名）
 
-本 workflow 只做 **--no-codesign**。要 IPA / TestFlight 需要：
-
-- Apple Developer 账号  
-- 在 workflow 中配置证书 Secrets（可后续再加 `ios-ipa` job）
+- 未签名调试包：**Flutter iOS Build** → `ios-runner-app`
+- **签名 IPA**：见 **[IOS_SIGNING_SETUP.md](./IOS_SIGNING_SETUP.md)**，运行 **Flutter iOS IPA (Signed)** → 下载 `ios-signed-ipa`

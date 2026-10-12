@@ -1,0 +1,130 @@
+# 使用 GitHub Secrets 签名并导出 IPA（需 Apple 开发者证书 + 描述文件）
+# 配置说明见 .github/IOS_SIGNING_SETUP.md
+
+name: Flutter iOS IPA (Signed)
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_url:
+        description: 站点根 URL（build_with_site）
+        required: true
+        default: http://crm.procode.cn:6002/
+      app_server_url:
+        description: 运行时 API 基址（dart-define）
+        required: true
+        default: http://crm.procode.cn:6002
+      export_method:
+        description: 导出方式（需与描述文件类型一致）
+        required: true
+        default: ad-hoc
+        type: choice
+        options:
+          - ad-hoc
+          - development
+          - app-store
+
+env:
+  PUB_HOSTED_URL: https://pub.flutter-io.cn
+  FLUTTER_STORAGE_BASE_URL: https://storage.flutter-io.cn
+
+jobs:
+  ios-ipa:
+    name: iOS signed IPA
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify signing secrets
+        run: |
+          test -n "${{ secrets.APPLE_TEAM_ID }}" || (echo "缺少 Secret: APPLE_TEAM_ID" && exit 1)
+          test -n "${{ secrets.IOS_CERTIFICATE_BASE64 }}" || (echo "缺少 Secret: IOS_CERTIFICATE_BASE64" && exit 1)
+          test -n "${{ secrets.IOS_CERTIFICATE_PASSWORD }}" || (echo "缺少 Secret: IOS_CERTIFICATE_PASSWORD" && exit 1)
+          test -n "${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}" || (echo "缺少 Secret: IOS_PROVISION_PROFILE_BASE64" && exit 1)
+          test -n "${{ secrets.KEYCHAIN_PASSWORD }}" || (echo "缺少 Secret: KEYCHAIN_PASSWORD" && exit 1)
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Prepare Flutter
+        run: flutter pub get
+
+      - name: Install SVG rasterizer
+        run: brew install librsvg
+
+      - name: CocoaPods
+        run: |
+          cd ios
+          pod install
+          cd ..
+
+      - name: Install signing certificate and provisioning profile
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERTIFICATE_PATH"
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o "$PP_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< "$(security cms -D -i "$PP_PATH")")
+          echo "PROVISIONING_PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp "$PP_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
+
+      - name: Configure ExportOptions and Release signing
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          EXPORT_METHOD: ${{ github.event.inputs.export_method }}
+        run: |
+          PLIST=ios/ExportOptions.plist
+          /usr/libexec/PlistBuddy -c "Set :method $EXPORT_METHOD" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :teamID $TEAM_ID" "$PLIST"
+
+          {
+            echo "DEVELOPMENT_TEAM=$TEAM_ID"
+            echo "CODE_SIGN_STYLE=Manual"
+            echo "PROVISIONING_PROFILE_SPECIFIER=${PROVISIONING_PROFILE_UUID}"
+          } >> ios/Flutter/Release.xcconfig
+
+          if [ "$EXPORT_METHOD" = "development" ]; then
+            echo "CODE_SIGN_IDENTITY=Apple Development" >> ios/Flutter/Release.xcconfig
+          else
+            echo "CODE_SIGN_IDENTITY=Apple Distribution" >> ios/Flutter/Release.xcconfig
+          fi
+
+      - name: Build signed IPA
+        run: |
+          dart run tool/build_with_site.dart \
+            --service="${{ github.event.inputs.service_url }}" \
+            build ipa --release \
+            --export-options-plist=ios/ExportOptions.plist \
+            --dart-define=APP_EXTERNAL_SERVER_URL=${{ github.event.inputs.app_server_url }} \
+            --dart-define=APP_INTERNAL_SERVER_URL=${{ github.event.inputs.app_server_url }}
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-signed-ipa
+          path: app/build/ios/ipa/*.ipa
+          if-no-files-found: error
