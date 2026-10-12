@@ -1,0 +1,60 @@
+# 仅构建 Android APK（Linux runner）
+
+name: Flutter Android Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_url:
+        description: 站点根 URL（build_with_site）
+        required: true
+        default: http://crm.procode.cn:6002/
+      app_server_url:
+        description: 运行时 API 基址（dart-define）
+        required: true
+        default: http://crm.procode.cn:6002
+
+env:
+  PUB_HOSTED_URL: https://pub.flutter-io.cn
+  FLUTTER_STORAGE_BASE_URL: https://storage.flutter-io.cn
+
+jobs:
+  android-apk:
+    name: Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Accept Android licenses
+        run: yes | flutter doctor --android-licenses || true
+
+      - name: Build APK
+        run: |
+          dart run tool/build_with_site.dart \
+            --service="${{ github.event.inputs.service_url }}" \
+            build apk --release \
+            --dart-define=APP_EXTERNAL_SERVER_URL=${{ github.event.inputs.app_server_url }} \
+            --dart-define=APP_INTERNAL_SERVER_URL=${{ github.event.inputs.app_server_url }}
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
