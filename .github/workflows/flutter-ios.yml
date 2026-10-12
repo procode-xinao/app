@@ -38,6 +38,9 @@ jobs:
       - name: Prepare Flutter (Generated.xcconfig for CocoaPods)
         run: flutter pub get
 
+      - name: Install SVG rasterizer (site icons may be SVG)
+        run: brew install librsvg
+
       - name: CocoaPods
         run: |
           cd ios

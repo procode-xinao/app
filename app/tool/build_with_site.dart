@@ -72,7 +72,7 @@ Future<void> main(List<String> args) async {
   final launcherFile = File('${brandDir.path}${Platform.pathSeparator}launcher_source.png');
 
   stdout.writeln('下载图标: $iconUrl');
-  await _downloadToFile(Uri.parse(iconUrl), launcherFile);
+  await _downloadIconToPng(Uri.parse(iconUrl), launcherFile);
   stdout.writeln('已写入 ${launcherFile.path}');
 
   stdout.writeln('dart pub get');
@@ -118,7 +118,7 @@ Future<void> main(List<String> args) async {
   exit(r.exitCode);
 }
 
-Future<void> _downloadToFile(Uri url, File out) async {
+Future<List<int>> _downloadBytes(Uri url) async {
   final client = HttpClient();
   try {
     final req = await client.getUrl(url);
@@ -127,13 +127,70 @@ Future<void> _downloadToFile(Uri url, File out) async {
       stderr.writeln('下载图标失败: HTTP ${resp.statusCode}');
       exit(1);
     }
-    final sink = out.openWrite();
-    try {
-      await sink.addStream(resp);
-    } finally {
-      await sink.close();
-    }
+    return await resp.fold<List<int>>(<int>[], (a, b) => a..addAll(b));
   } finally {
     client.close(force: true);
   }
+}
+
+bool _looksLikeSvg(List<int> bytes, Uri url) {
+  if (url.path.toLowerCase().endsWith('.svg')) return true;
+  final head = utf8.decode(bytes.take(512).toList(), allowMalformed: true).trimLeft();
+  return head.startsWith('<svg') || head.startsWith('<?xml');
+}
+
+/// flutter_launcher_icons 需要 PNG；站点若返回 SVG 则先栅格化。
+Future<void> _downloadIconToPng(Uri url, File outPng) async {
+  final bytes = await _downloadBytes(url);
+  if (!_looksLikeSvg(bytes, url)) {
+    await outPng.writeAsBytes(bytes);
+    return;
+  }
+
+  stdout.writeln('图标为 SVG，正在转换为 PNG…');
+  final tmpSvg = File('${outPng.path}.tmp.svg');
+  await tmpSvg.writeAsBytes(bytes);
+  try {
+    await _rasterizeSvgToPng(tmpSvg, outPng);
+  } finally {
+    if (await tmpSvg.exists()) {
+      await tmpSvg.delete();
+    }
+  }
+}
+
+Future<void> _rasterizeSvgToPng(File svg, File png) async {
+  const size = '1024';
+  final attempts = <List<String>>[
+    ['rsvg-convert', '-w', size, '-h', size, svg.path, '-o', png.path],
+    ['magick', 'convert', '-background', 'none', svg.path, png.path],
+    ['convert', '-background', 'none', svg.path, png.path],
+  ];
+
+  Object? lastError;
+  for (final cmd in attempts) {
+    final exe = cmd.first;
+    if (!await _commandExists(exe)) continue;
+    final r = await Process.run(cmd.first, cmd.sublist(1), runInShell: false);
+    if (r.exitCode == 0 && await png.exists() && await png.length() > 0) {
+      return;
+    }
+    lastError = r.stderr.toString().trim().isEmpty ? r.stdout : r.stderr;
+  }
+
+  stderr.writeln('无法将 SVG 转为 PNG。请安装 rsvg-convert（推荐）或 ImageMagick，'
+      '或在站点配置 PNG 格式 icon/logo。');
+  if (lastError != null) {
+    stderr.writeln(lastError);
+  }
+  exit(1);
+}
+
+Future<bool> _commandExists(String name) async {
+  if (Platform.isWindows) {
+    final r = await Process.run('where', [name], runInShell: true);
+    return r.exitCode == 0;
+  }
+  final r = await Process.run('which', [name], runInShell: true);
+  return r.exitCode == 0;
 }
