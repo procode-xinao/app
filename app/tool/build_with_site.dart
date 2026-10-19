@@ -13,7 +13,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-void _usage() {
+Never _usage() {
   stderr.writeln('缺少必填参数 --service=');
   stderr.writeln('');
   stderr.writeln('用法: dart run tool/build_with_site.dart \\');
@@ -138,12 +138,13 @@ Future<void> main(List<String> args) async {
   if (serviceRaw == null || serviceRaw.isEmpty) {
     _usage();
   }
+  final service = serviceRaw;
 
-  final apiBase = _apiBaseFromService(serviceRaw);
+  final apiBase = _apiBaseFromService(service);
   var code = (codeFlag != null && codeFlag.isNotEmpty) ? codeFlag : 'code';
 
   stdout.writeln('构建参数:');
-  stdout.writeln('  service = $serviceRaw');
+  stdout.writeln('  service = $service');
   stdout.writeln('  apiBase = $apiBase');
   stdout.writeln('  code    = $code');
   stdout.writeln('');
