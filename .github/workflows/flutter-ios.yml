@@ -6,17 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       service_url:
-        description: 站点根 URL（build_with_site，建议含尾斜杠）
-        required: true
-      external_server_url:
-        description: 外网 API 基址（APP_EXTERNAL_SERVER_URL）
-        required: true
-      internal_server_url:
-        description: 内网 API 基址（APP_INTERNAL_SERVER_URL）
+        description: 服务根 URL（build_with_site --service=）
         required: true
       app_code:
-        description: 租户 code（APP_CODE）
-        required: true
+        description: 可选租户 code（默认 code）
+        required: false
+        default: code
 
 env:
   PUB_HOSTED_URL: https://pub.flutter-io.cn
@@ -55,8 +50,6 @@ jobs:
         run: |
           dart run tool/build_with_site.dart \
             --service="${{ github.event.inputs.service_url }}" \
-            --external-server="${{ github.event.inputs.external_server_url }}" \
-            --internal-server="${{ github.event.inputs.internal_server_url }}" \
             --code="${{ github.event.inputs.app_code }}" \
             build ios --release --no-codesign
 

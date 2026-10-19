@@ -1,38 +1,29 @@
-// 从站点拉取 /api/{code}/v1/site，使用 name 作为 APP_DISPLAY_NAME，icon 下载后生成各平台启动图标，再执行 flutter build。
+// 从站点拉取 /api/{code}/v1/site（name、icon），再请求 /v1/app（jpush、衬色等），最后 flutter build。
 //
-// 必填（构建时必须显式指定，无默认值）：
-//   --service=<站点根 URL>           拉 /v1/site（应用名、图标）
-//   --external-server=<外网 API>     → APP_EXTERNAL_SERVER_URL
-//   --internal-server=<内网 API>     → APP_INTERNAL_SERVER_URL
-//   --code=<租户 code>               → APP_CODE
+// 必填：--service=<服务根 URL>（API 基址，可带末尾 /）
+// 可选：--code=<租户 code>（默认 code）
+//
+// 自动注入 dart-define：
+//   APP_EXTERNAL_SERVER_URL / APP_INTERNAL_SERVER_URL ← 由 --service 规范化（去尾斜杠）
+//   APP_CODE、APP_DISPLAY_NAME、以及 /v1/app 中的 jpush_app_key、top_background_color 等
 //
 // 用法（在 app 目录下）：
-//   dart run tool/build_with_site.dart \
-//     --service=http://host:6002/ \
-//     --external-server=http://host:6002 \
-//     --internal-server=http://host:6002 \
-//     --code=code \
-//     build apk --release
+//   dart run tool/build_with_site.dart --service=http://host:6002/ build apk --release
 
 import 'dart:convert';
 import 'dart:io';
 
 void _usage() {
-  stderr.writeln('缺少必填构建参数。');
+  stderr.writeln('缺少必填参数 --service=');
   stderr.writeln('');
   stderr.writeln('用法: dart run tool/build_with_site.dart \\');
-  stderr.writeln('  --service=<站点根URL> \\');
-  stderr.writeln('  --external-server=<外网API基址> \\');
-  stderr.writeln('  --internal-server=<内网API基址> \\');
-  stderr.writeln('  --code=<APP_CODE> \\');
+  stderr.writeln('  --service=<服务根URL> \\');
+  stderr.writeln('  [--code=<APP_CODE>] \\');
   stderr.writeln('  [flutter 子命令，默认: build apk --release]');
   stderr.writeln('');
   stderr.writeln('示例:');
   stderr.writeln('  dart run tool/build_with_site.dart \\');
-  stderr.writeln('    --service=http://crm.procode.cn:6002/ \\');
-  stderr.writeln('    --external-server=http://crm.procode.cn:6002 \\');
-  stderr.writeln('    --internal-server=http://crm.procode.cn:6002 \\');
-  stderr.writeln('    --code=code build apk --release');
+  stderr.writeln('    --service=http://crm.procode.cn:6002/ build apk --release');
   exit(64);
 }
 
@@ -45,12 +36,85 @@ String? _parseFlag(List<String> args, String prefix) {
   return null;
 }
 
+const _scriptFlagPrefixes = ['--service=', '--code='];
+
+/// 与运行时 [Uri.parse(base).resolve('/api/...')] 一致：去掉末尾 `/`。
+String _apiBaseFromService(String service) {
+  var s = service.trim();
+  while (s.endsWith('/')) {
+    s = s.substring(0, s.length - 1);
+  }
+  if (s.isEmpty) {
+    stderr.writeln('--service= 无效');
+    exit(64);
+  }
+  return s;
+}
+
+Future<Map<String, dynamic>> _getJsonObject(Uri uri, {required String label}) async {
+  stdout.writeln('GET $uri');
+  final client = HttpClient();
+  try {
+    final req = await client.getUrl(uri);
+    final resp = await req.close();
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      stderr.writeln('$label 失败: HTTP ${resp.statusCode}');
+      exit(1);
+    }
+    final raw = await resp.transform(utf8.decoder).join();
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map<String, dynamic>) {
+      stderr.writeln('$label 返回非 JSON 对象');
+      exit(1);
+    }
+    return decoded;
+  } finally {
+    client.close(force: true);
+  }
+}
+
+Future<Map<String, dynamic>?> _tryFetchAppConfig(String apiBase, String code) async {
+  final uri = Uri.parse(apiBase).resolve('/api/${Uri.encodeComponent(code)}/v1/app');
+  stdout.writeln('GET $uri（jpush / 衬色等）');
+  final client = HttpClient();
+  try {
+    final req = await client.getUrl(uri);
+    final resp = await req.close();
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      stdout.writeln('  /v1/app HTTP ${resp.statusCode}，跳过可选 dart-define');
+      return null;
+    }
+    final raw = await resp.transform(utf8.decoder).join();
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map<String, dynamic>) return null;
+    if (decoded['is_enable'] != true) {
+      stdout.writeln('  /v1/app is_enable != true，跳过可选 dart-define');
+      return null;
+    }
+    return decoded;
+  } catch (e) {
+    stdout.writeln('  /v1/app 请求失败: $e');
+    return null;
+  } finally {
+    client.close(force: true);
+  }
+}
+
+String _normalizeHexColor(String raw) {
+  var s = raw.trim();
+  if (s.startsWith('#')) s = s.substring(1);
+  return s.toUpperCase();
+}
+
 List<String> _stripManagedDartDefines(List<String> args) {
   const managedKeys = {
     'APP_EXTERNAL_SERVER_URL',
     'APP_INTERNAL_SERVER_URL',
     'APP_CODE',
     'APP_DISPLAY_NAME',
+    'APP_TOP_BACKGROUND_COLOR',
+    'JPUSH_APP_KEY',
+    'JPUSH_CHANNEL',
   };
   return args.where((a) {
     if (!a.startsWith('--dart-define=')) return true;
@@ -62,66 +126,40 @@ List<String> _stripManagedDartDefines(List<String> args) {
 }
 
 Future<void> main(List<String> args) async {
-  final service = _parseFlag(args, '--service=');
-  final externalServer = _parseFlag(args, '--external-server=');
-  final internalServer = _parseFlag(args, '--internal-server=');
-  final code = _parseFlag(args, '--code=');
+  final serviceRaw = _parseFlag(args, '--service=');
+  final codeFlag = _parseFlag(args, '--code=');
 
   final flutterRest = <String>[];
   for (final a in args) {
-    if (a.startsWith('--service=') ||
-        a.startsWith('--external-server=') ||
-        a.startsWith('--internal-server=') ||
-        a.startsWith('--code=')) {
-      continue;
-    }
+    if (_scriptFlagPrefixes.any((p) => a.startsWith(p))) continue;
     flutterRest.add(a);
   }
 
-  if (service == null ||
-      service.isEmpty ||
-      externalServer == null ||
-      externalServer.isEmpty ||
-      internalServer == null ||
-      internalServer.isEmpty ||
-      code == null ||
-      code.isEmpty) {
+  if (serviceRaw == null || serviceRaw.isEmpty) {
     _usage();
   }
 
+  final apiBase = _apiBaseFromService(serviceRaw);
+  var code = (codeFlag != null && codeFlag.isNotEmpty) ? codeFlag : 'code';
+
   stdout.writeln('构建参数:');
-  stdout.writeln('  service          = $service');
-  stdout.writeln('  external-server  = $externalServer');
-  stdout.writeln('  internal-server  = $internalServer');
-  stdout.writeln('  code             = $code');
+  stdout.writeln('  service = $serviceRaw');
+  stdout.writeln('  apiBase = $apiBase');
+  stdout.writeln('  code    = $code');
   stdout.writeln('');
 
   final projectRoot = File(Platform.script.toFilePath()).parent.parent.path;
-  final siteUri = Uri.parse(service).resolve('api/${Uri.encodeComponent(code)}/v1/site');
+  final siteUri = Uri.parse(apiBase).resolve('/api/${Uri.encodeComponent(code)}/v1/site');
+  final siteJson = await _getJsonObject(siteUri, label: '/v1/site');
 
-  stdout.writeln('GET $siteUri');
-  final client = HttpClient();
-  Map<String, dynamic> json;
-  try {
-    final req = await client.getUrl(siteUri);
-    final resp = await req.close();
-    if (resp.statusCode < 200 || resp.statusCode >= 300) {
-      stderr.writeln('站点接口失败: HTTP ${resp.statusCode}');
-      exit(1);
-    }
-    final raw = await resp.transform(utf8.decoder).join();
-    final decoded = jsonDecode(raw);
-    if (decoded is! Map<String, dynamic>) {
-      stderr.writeln('站点接口返回非 JSON 对象');
-      exit(1);
-    }
-    json = decoded;
-  } finally {
-    client.close(force: true);
+  final siteCode = siteJson['code']?.toString().trim();
+  if ((codeFlag == null || codeFlag.isEmpty) && siteCode != null && siteCode.isNotEmpty) {
+    code = siteCode;
+    stdout.writeln('  使用 /v1/site 返回的 code: $code');
   }
 
-  final name = json['name']?.toString().trim();
-  final iconUrl = (json['icon'] ?? json['logo'])?.toString().trim();
+  final name = siteJson['name']?.toString().trim();
+  final iconUrl = (siteJson['icon'] ?? siteJson['logo'])?.toString().trim();
   if (name == null || name.isEmpty) {
     stderr.writeln('响应中缺少非空字段 name');
     exit(1);
@@ -164,14 +202,28 @@ Future<void> main(List<String> args) async {
     exit(r.exitCode);
   }
 
+  final appConfig = await _tryFetchAppConfig(apiBase, code);
+
   final flutterArgs =
       _stripManagedDartDefines(flutterRest.isEmpty ? <String>['build', 'apk', '--release'] : flutterRest);
-  final defines = [
-    '--dart-define=APP_EXTERNAL_SERVER_URL=$externalServer',
-    '--dart-define=APP_INTERNAL_SERVER_URL=$internalServer',
+  final defines = <String>[
+    '--dart-define=APP_EXTERNAL_SERVER_URL=$apiBase',
+    '--dart-define=APP_INTERNAL_SERVER_URL=$apiBase',
     '--dart-define=APP_CODE=$code',
     '--dart-define=APP_DISPLAY_NAME=$name',
   ];
+
+  final jpushAppKey = (appConfig?['jpush_app_key'] ?? '').toString().trim();
+  if (jpushAppKey.isNotEmpty) {
+    defines.add('--dart-define=JPUSH_APP_KEY=$jpushAppKey');
+    defines.add('--dart-define=JPUSH_CHANNEL=default');
+  }
+
+  final topColor = (appConfig?['top_background_color'] ?? '').toString().trim();
+  if (topColor.isNotEmpty) {
+    defines.add('--dart-define=APP_TOP_BACKGROUND_COLOR=${_normalizeHexColor(topColor)}');
+  }
+
   final full = [...flutterArgs, ...defines];
 
   stdout.writeln('flutter ${full.join(' ')}');
@@ -209,7 +261,6 @@ bool _looksLikeSvg(List<int> bytes, Uri url) {
   return head.startsWith('<svg') || head.startsWith('<?xml');
 }
 
-/// flutter_launcher_icons 需要 PNG；站点若返回 SVG 则先栅格化。
 Future<void> _downloadIconToPng(Uri url, File outPng) async {
   final bytes = await _downloadBytes(url);
   if (!_looksLikeSvg(bytes, url)) {

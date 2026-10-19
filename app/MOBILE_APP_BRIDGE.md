@@ -551,22 +551,16 @@ if (picked) console.log(picked.id, picked.phones);
 
 在 **`app/`** 目录执行脚本：请求 **`{service}api/{code}/v1/site`**，用返回的 **`name`** 作为 **`APP_DISPLAY_NAME`**，将 **`icon`** 下载到 `assets/brand/launcher_source.png` 后执行 **`flutter_launcher_icons`**，再执行 **`flutter build`**。
 
-**四个参数均为必填**（无默认域名），详见 **`BUILD.md`**：
+只需 **`--service=<服务根 URL>`**（可选 **`--code=`**，默认 `code`），详见 **`BUILD.md`**：
 
 ```bash
-dart run tool/build_with_site.dart \
-  --service=http://host:6002/ \
-  --external-server=http://host:6002 \
-  --internal-server=http://host:6002 \
-  --code=code \
-  build apk --release
+dart run tool/build_with_site.dart --service=http://host:6002/ build apk --release
 ```
 
-- **`--service`**：站点根 URL（可带末尾 `/`），用于拉站点名与图标。
-- **`--external-server` / `--internal-server`**：编译注入 `APP_EXTERNAL_SERVER_URL` / `APP_INTERNAL_SERVER_URL`。
-- **`--code`**：租户 code，编译注入 `APP_CODE`。
-- **后续参数**：传给 `flutter`；省略时默认为 `build apk --release`。
+- 构建时请求 **`/v1/site`**（名称、图标）与 **`/v1/app`**（极光 key、衬色等），并注入 `APP_*` / `JPUSH_*` 等 `--dart-define`。
+- **`APP_EXTERNAL_SERVER_URL` / `APP_INTERNAL_SERVER_URL`** 由 `--service` 规范化得到（去尾斜杠），内外网相同。
+- **后续参数** 传给 `flutter`；省略时默认为 `build apk --release`。
 
-Windows 快捷方式：`build.bat <SERVICE> <外网> <内网> <CODE>`。
+Windows：`build.bat <SERVICE_URL> [code]`。
 
-构建机需能访问上述 URL；图标可为 PNG 或 SVG（CI/本机需 `rsvg-convert` 或 ImageMagick）。
+构建机需能访问服务地址；图标可为 PNG 或 SVG（需 `rsvg-convert` 或 ImageMagick）。

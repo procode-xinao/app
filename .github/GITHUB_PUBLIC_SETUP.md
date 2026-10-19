@@ -31,7 +31,7 @@ git push -u github master:main
 
 1. 打开 GitHub 仓库 → **Actions**  
 2. 左侧选 **Flutter Build**  
-3. **Run workflow**（**必须填写** `service_url`、`external_server_url`、`internal_server_url`、`app_code`，无默认域名）  
+3. **Run workflow**（填写 **`service_url`**；可选 **`app_code`**，默认 `code`）  
 4. 跑完后在 **Summary → Artifacts** 下载：  
    - `app-release-apk`：Android APK  
    - `ios-runner-app`：未签名的 iOS `.app`（上架需 Apple 证书 + Xcode Archive）

@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 用法: ./build-ios.sh <SERVICE_URL> <外网API> <内网API> <APP_CODE>
-# 详见 BUILD.md
+# 用法: ./build-ios.sh <SERVICE_URL> [APP_CODE]
 
-if [[ $# -lt 4 ]]; then
-  echo "用法: $0 <SERVICE_URL> <外网API> <内网API> <APP_CODE>" >&2
-  echo "示例: $0 http://crm.procode.cn:6002/ http://crm.procode.cn:6002 http://crm.procode.cn:6002 code" >&2
+if [[ $# -lt 1 ]]; then
+  echo "用法: $0 <SERVICE_URL> [APP_CODE]" >&2
+  echo "示例: $0 http://crm.procode.cn:6002/" >&2
   exit 64
 fi
 
 SERVICE="$1"
-EXTERNAL="$2"
-INTERNAL="$3"
-CODE="$4"
+CODE="${2:-}"
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -27,14 +24,14 @@ dart pub get
 echo "==> CocoaPods (ios/)"
 (cd ios && pod install)
 
-echo "==> build ios (release, no codesign — 需在 Xcode 里 Archive 并签名出 IPA)"
+CODE_ARGS=()
+[[ -n "$CODE" ]] && CODE_ARGS=(--code="$CODE")
+
+echo "==> build ios (release, no codesign)"
 dart run tool/build_with_site.dart \
   --service="${SERVICE}" \
-  --external-server="${EXTERNAL}" \
-  --internal-server="${INTERNAL}" \
-  --code="${CODE}" \
+  "${CODE_ARGS[@]}" \
   build ios --release --no-codesign
 
 echo ""
 echo "Build OK (unsigned .app): build/ios/iphoneos/Runner.app"
-echo "上架/真机安装：用 Xcode 打开 ios/Runner.xcworkspace → Product → Archive → Distribute"
