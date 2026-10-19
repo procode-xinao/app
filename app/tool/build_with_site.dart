@@ -1,39 +1,103 @@
 // 从站点拉取 /api/{code}/v1/site，使用 name 作为 APP_DISPLAY_NAME，icon 下载后生成各平台启动图标，再执行 flutter build。
 //
-// 用法（在 app 目录下）：
-//   dart run tool/build_with_site.dart --service=http://web.arsoft.com.cn:6002/ build apk --release
-//   dart run tool/build_with_site.dart --service=http://host:6002/ --code=code build ios --release
+// 必填（构建时必须显式指定，无默认值）：
+//   --service=<站点根 URL>           拉 /v1/site（应用名、图标）
+//   --external-server=<外网 API>     → APP_EXTERNAL_SERVER_URL
+//   --internal-server=<内网 API>     → APP_INTERNAL_SERVER_URL
+//   --code=<租户 code>               → APP_CODE
 //
-// 若省略 flutter 子命令，默认为：build apk --release
+// 用法（在 app 目录下）：
+//   dart run tool/build_with_site.dart \
+//     --service=http://host:6002/ \
+//     --external-server=http://host:6002 \
+//     --internal-server=http://host:6002 \
+//     --code=code \
+//     build apk --release
 
 import 'dart:convert';
 import 'dart:io';
 
-Future<void> main(List<String> args) async {
-  String? service;
-  var code = 'code';
-  final flutterRest = <String>[];
+void _usage() {
+  stderr.writeln('缺少必填构建参数。');
+  stderr.writeln('');
+  stderr.writeln('用法: dart run tool/build_with_site.dart \\');
+  stderr.writeln('  --service=<站点根URL> \\');
+  stderr.writeln('  --external-server=<外网API基址> \\');
+  stderr.writeln('  --internal-server=<内网API基址> \\');
+  stderr.writeln('  --code=<APP_CODE> \\');
+  stderr.writeln('  [flutter 子命令，默认: build apk --release]');
+  stderr.writeln('');
+  stderr.writeln('示例:');
+  stderr.writeln('  dart run tool/build_with_site.dart \\');
+  stderr.writeln('    --service=http://crm.procode.cn:6002/ \\');
+  stderr.writeln('    --external-server=http://crm.procode.cn:6002 \\');
+  stderr.writeln('    --internal-server=http://crm.procode.cn:6002 \\');
+  stderr.writeln('    --code=code build apk --release');
+  exit(64);
+}
+
+String? _parseFlag(List<String> args, String prefix) {
   for (final a in args) {
-    if (a.startsWith('--service=')) {
-      service = a.substring('--service='.length);
-    } else if (a.startsWith('--code=')) {
-      code = a.substring('--code='.length);
-    } else {
-      flutterRest.add(a);
+    if (a.startsWith(prefix)) {
+      return a.substring(prefix.length).trim();
     }
   }
+  return null;
+}
 
-  if (service == null || service.trim().isEmpty) {
-    stderr.writeln('缺少 --service=<基础 URL>，例如 --service=http://web.arsoft.com.cn:6002/');
-    stderr.writeln(
-      '用法: dart run tool/build_with_site.dart --service=<URL> [--code=code] [flutter 参数...]',
-    );
-    stderr.writeln('默认 flutter 参数: build apk --release');
-    exit(64);
+List<String> _stripManagedDartDefines(List<String> args) {
+  const managedKeys = {
+    'APP_EXTERNAL_SERVER_URL',
+    'APP_INTERNAL_SERVER_URL',
+    'APP_CODE',
+    'APP_DISPLAY_NAME',
+  };
+  return args.where((a) {
+    if (!a.startsWith('--dart-define=')) return true;
+    for (final key in managedKeys) {
+      if (a.startsWith('--dart-define=$key=')) return false;
+    }
+    return true;
+  }).toList();
+}
+
+Future<void> main(List<String> args) async {
+  final service = _parseFlag(args, '--service=');
+  final externalServer = _parseFlag(args, '--external-server=');
+  final internalServer = _parseFlag(args, '--internal-server=');
+  final code = _parseFlag(args, '--code=');
+
+  final flutterRest = <String>[];
+  for (final a in args) {
+    if (a.startsWith('--service=') ||
+        a.startsWith('--external-server=') ||
+        a.startsWith('--internal-server=') ||
+        a.startsWith('--code=')) {
+      continue;
+    }
+    flutterRest.add(a);
   }
 
+  if (service == null ||
+      service.isEmpty ||
+      externalServer == null ||
+      externalServer.isEmpty ||
+      internalServer == null ||
+      internalServer.isEmpty ||
+      code == null ||
+      code.isEmpty) {
+    _usage();
+  }
+
+  stdout.writeln('构建参数:');
+  stdout.writeln('  service          = $service');
+  stdout.writeln('  external-server  = $externalServer');
+  stdout.writeln('  internal-server  = $internalServer');
+  stdout.writeln('  code             = $code');
+  stdout.writeln('');
+
   final projectRoot = File(Platform.script.toFilePath()).parent.parent.path;
-  final siteUri = Uri.parse(service.trim()).resolve('api/$code/v1/site');
+  final siteUri = Uri.parse(service).resolve('api/${Uri.encodeComponent(code)}/v1/site');
 
   stdout.writeln('GET $siteUri');
   final client = HttpClient();
@@ -63,7 +127,7 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
   if (iconUrl == null || iconUrl.isEmpty) {
-    stderr.writeln('响应中缺少非空字段 icon');
+    stderr.writeln('响应中缺少非空字段 icon/logo');
     exit(1);
   }
 
@@ -100,9 +164,15 @@ Future<void> main(List<String> args) async {
     exit(r.exitCode);
   }
 
-  final flutterArgs = flutterRest.isEmpty ? <String>['build', 'apk', '--release'] : flutterRest;
-  final define = '--dart-define=APP_DISPLAY_NAME=$name';
-  final full = [...flutterArgs, define];
+  final flutterArgs =
+      _stripManagedDartDefines(flutterRest.isEmpty ? <String>['build', 'apk', '--release'] : flutterRest);
+  final defines = [
+    '--dart-define=APP_EXTERNAL_SERVER_URL=$externalServer',
+    '--dart-define=APP_INTERNAL_SERVER_URL=$internalServer',
+    '--dart-define=APP_CODE=$code',
+    '--dart-define=APP_DISPLAY_NAME=$name',
+  ];
+  final full = [...flutterArgs, ...defines];
 
   stdout.writeln('flutter ${full.join(' ')}');
   r = await Process.run(

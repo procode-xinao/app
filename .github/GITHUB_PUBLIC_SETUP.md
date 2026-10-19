@@ -31,7 +31,7 @@ git push -u github master:main
 
 1. 打开 GitHub 仓库 → **Actions**  
 2. 左侧选 **Flutter Build**  
-3. **Run workflow**（可改 `service_url` / `app_server_url`，默认已是 crm.procode.cn）  
+3. **Run workflow**（**必须填写** `service_url`、`external_server_url`、`internal_server_url`、`app_code`，无默认域名）  
 4. 跑完后在 **Summary → Artifacts** 下载：  
    - `app-release-apk`：Android APK  
    - `ios-runner-app`：未签名的 iOS `.app`（上架需 Apple 证书 + Xcode Archive）
@@ -39,7 +39,7 @@ git push -u github master:main
 ## 4. 费用说明（公开仓库）
 
 - 使用 **GitHub 官方 hosted runner** 构建 **公开仓库** 时，标准 Actions 用量 **免费**。  
-- 构建机需能访问：`crm.procode.cn:6002`、`storage.procode.cn`（拉站点与图标）。
+- 构建机需能访问你在 workflow 中填写的站点/API 地址，以及图标 CDN（若有）。
 
 ## 5. iOS IPA（签名）
 
